@@ -1,22 +1,28 @@
 // cmd/goblin/main.go
 //
 // Dispatcher multi-call. Reemplaza a cmd/busybox, que se borró junto con
-// la poda (ver HANDOFF.md). Por ahora solo dispatchea a los 37 applets
-// que sobrevivieron el recorte — sin pstree ni los verbos de goblin
-// todavía, esos no existen como paquete aún.
+// la poda (ver HANDOFF.md). Expone los applets que sobrevivieron el recorte,
+// más pstree y los cinco verbos de contrato (goblinsubmit/pause/resume/kill/list).
+// En la migración a cgroups este dispatcher pasará a llamarse cmd/grimoire.
 package main
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"goblin/pkg/applets/ash"
 	"goblin/pkg/applets/awk"
 	"goblin/pkg/applets/cat"
 	"goblin/pkg/applets/cp"
+	"goblin/pkg/applets/cut"
+	"goblin/pkg/applets/diff"
 	"goblin/pkg/applets/echo"
 	"goblin/pkg/applets/find"
 	"goblin/pkg/applets/free"
+	"goblin/pkg/applets/goblinkill"
+	"goblin/pkg/applets/goblinlist"
+	"goblin/pkg/applets/goblinpause"
+	"goblin/pkg/applets/goblinresume"
+	"goblin/pkg/applets/goblinsubmit"
+	"goblin/pkg/applets/grep"
 	"goblin/pkg/applets/gunzip"
 	"goblin/pkg/applets/gzip"
 	"goblin/pkg/applets/head"
@@ -31,38 +37,41 @@ import (
 	"goblin/pkg/applets/pgrep"
 	"goblin/pkg/applets/pidof"
 	"goblin/pkg/applets/pkill"
+	"goblin/pkg/applets/printf"
 	"goblin/pkg/applets/ps"
+	"goblin/pkg/applets/pstree"
 	"goblin/pkg/applets/pwd"
 	"goblin/pkg/applets/renice"
 	"goblin/pkg/applets/rm"
 	"goblin/pkg/applets/rmdir"
+	"goblin/pkg/applets/sed"
 	"goblin/pkg/applets/setsid"
 	"goblin/pkg/applets/sleep"
+	"goblin/pkg/applets/sort"
 	"goblin/pkg/applets/startstopdaemon"
 	"goblin/pkg/applets/tail"
 	"goblin/pkg/applets/tar"
 	"goblin/pkg/applets/taskset"
 	apptime "goblin/pkg/applets/time" // alias: choca con el paquete stdlib "time"
 	"goblin/pkg/applets/timeout"
+	"goblin/pkg/applets/tr"
+	"goblin/pkg/applets/uniq"
 	"goblin/pkg/applets/uptime"
 	"goblin/pkg/applets/wc"
 	"goblin/pkg/applets/xargs"
 	"goblin/pkg/core"
-	"goblin/pkg/applets/pstree"
-	"goblin/pkg/applets/goblinsubmit"
-	"goblin/pkg/applets/goblinpause"
-	"goblin/pkg/applets/goblinresume"
-	"goblin/pkg/applets/goblinkill"
-	"goblin/pkg/applets/goblinlist"
+	"os"
+	"path/filepath"
 )
 
 type runFunc func(stdio *core.Stdio, args []string) int
 
-// registry: los 37 applets que quedaron después de la poda.
+// registry: applets despachables del árbol podado — los 37 que sobrevivieron
+// el recorte, pstree, los cinco verbos de contrato y los 8 applets de texto
+// que existían en pkg/applets pero no se despachaban (cut, diff, grep,
+// printf, sed, sort, tr, uniq).
 // Fuera a propósito (eliminados del árbol, ver HANDOFF.md):
 // dig, nc, ss, wget, logname, users, w, who, whoami, watch, ionice, top.
-// Todavía no existen como paquete (paso 2/3 del roadmap):
-// pstree, goblinsubmit, goblinpause, goblinresume, goblinkill, goblinlist.
 var registry = map[string]runFunc{
 	"ash":             ash.Run,
 	"awk":             awk.Run,
@@ -101,12 +110,20 @@ var registry = map[string]runFunc{
 	"uptime":          uptime.Run,
 	"wc":              wc.Run,
 	"xargs":           xargs.Run,
-	"pstree":       pstree.Run,
-	"goblinsubmit": goblinsubmit.Run,
-	"goblinpause":  goblinpause.Run,
-	"goblinresume": goblinresume.Run,
-	"goblinkill":   goblinkill.Run,
-	"goblinlist":   goblinlist.Run,
+	"cut":             cut.Run,
+	"diff":            diff.Run,
+	"grep":            grep.Run,
+	"printf":          printf.Run,
+	"sed":             sed.Run,
+	"sort":            sort.Run,
+	"tr":              tr.Run,
+	"uniq":            uniq.Run,
+	"pstree":          pstree.Run,
+	"goblinsubmit":    goblinsubmit.Run,
+	"goblinpause":     goblinpause.Run,
+	"goblinresume":    goblinresume.Run,
+	"goblinkill":      goblinkill.Run,
+	"goblinlist":      goblinlist.Run,
 }
 
 func main() {

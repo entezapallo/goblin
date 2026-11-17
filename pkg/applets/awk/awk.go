@@ -21,7 +21,6 @@ import (
 	"github.com/benhoyt/goawk/parser"
 	"goblin/pkg/core"
 	corefs "goblin/pkg/core/fs"
-	"goblin/pkg/sandbox"
 )
 
 // TODO: Port full BusyBox awk engine. This is a partial port to unblock tests.
@@ -495,11 +494,6 @@ func runGoAwk(stdio *core.Stdio, programName string, program string, files []str
 			}
 			config.Environ = append(config.Environ, name, value)
 		}
-	}
-	if sandbox.IsEnabled() {
-		config.NoFileReads = true
-		config.NoFileWrites = true
-		config.NoExec = true
 	}
 	status, err := interp.ExecProgram(prog, config)
 	if err != nil {

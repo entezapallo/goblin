@@ -6,10 +6,10 @@
 package pstree
 
 import (
-   "os"
-	"strconv"
 	"goblin/pkg/applets/gprocutil"
 	"goblin/pkg/core"
+	"os"
+	"strconv"
 )
 
 // Run ejecuta pstree con los argumentos dados.

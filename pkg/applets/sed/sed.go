@@ -653,10 +653,10 @@ func (p *parser) parseTransliterate(cmd *sedCommand) error {
 // --- Execution ---
 
 type lineReader struct {
-	lines      []string
-	pos        int
-	hasNL      bool  // whether original input ended with newline
-	noNLLines  map[int]bool // set of 1-based line numbers that have no trailing newline
+	lines     []string
+	pos       int
+	hasNL     bool         // whether original input ended with newline
+	noNLLines map[int]bool // set of 1-based line numbers that have no trailing newline
 }
 
 func (lr *lineReader) next() (string, bool) {
@@ -684,11 +684,11 @@ type engine struct {
 	rangeStart        map[*sedCommand]int
 	wfiles            map[string]*os.File
 	wfileLastLine     map[string]int // last lineNum written to each wfile
-	lastWasAppend     bool // true if last output was from a/i/c command
-	lastOutputLineNum int  // line number of last output
-	lastFullCycleLine int  // lineNum of last line that got full command processing
-	prevCycleLine     int  // lineNum of line before lastFullCycleLine (for gap detection)
-	noNLLines         map[int]bool // 1-based line numbers with no trailing newline
+	lastWasAppend     bool           // true if last output was from a/i/c command
+	lastOutputLineNum int            // line number of last output
+	lastFullCycleLine int            // lineNum of last line that got full command processing
+	prevCycleLine     int            // lineNum of line before lastFullCycleLine (for gap detection)
+	noNLLines         map[int]bool   // 1-based line numbers with no trailing newline
 }
 
 func newEngine(prog []*sedCommand, quiet bool) *engine {

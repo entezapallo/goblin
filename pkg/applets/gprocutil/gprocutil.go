@@ -6,6 +6,7 @@
 // a pkg/applets/procutil (mismo patrón: helper compartido colocado con
 // los applets, no en pkg/core).
 package gprocutil
+
 import (
 	"os"
 	"path/filepath"

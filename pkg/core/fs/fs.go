@@ -1,5 +1,6 @@
-// Package fs provides filesystem operations that respect sandbox boundaries.
-// Applets should use this package instead of direct os calls.
+// Package fs provide the filesystem operations used by the applets.
+// Antes delegaba en pkg/sandbox (WASM); con el sandbox fuera del proyecto,
+// las operaciones son llamadas directas a os con la misma API.
 package fs
 
 import (
@@ -7,88 +8,86 @@ import (
 	"io/fs"
 	"os"
 	"time"
-
-	"goblin/pkg/sandbox"
 )
 
 // Open opens a file for reading.
 func Open(path string) (*os.File, error) {
-	return sandbox.Open(path)
+	return os.Open(path)
 }
 
 // Create creates a file for writing.
 func Create(path string) (*os.File, error) {
-	return sandbox.Create(path)
+	return os.Create(path)
 }
 
 // OpenFile opens a file with flags.
 func OpenFile(path string, flag int, perm os.FileMode) (*os.File, error) {
-	return sandbox.OpenFile(path, flag, perm)
+	return os.OpenFile(path, flag, perm)
 }
 
 // ReadFile reads an entire file.
 func ReadFile(path string) ([]byte, error) {
-	return sandbox.ReadFile(path)
+	return os.ReadFile(path)
 }
 
 // WriteFile writes data to a file.
 func WriteFile(path string, data []byte, perm os.FileMode) error {
-	return sandbox.WriteFile(path, data, perm)
+	return os.WriteFile(path, data, perm)
 }
 
 // Stat returns file info.
 func Stat(path string) (os.FileInfo, error) {
-	return sandbox.Stat(path)
+	return os.Stat(path)
 }
 
 // Lstat returns file info without following symlinks.
 func Lstat(path string) (os.FileInfo, error) {
-	return sandbox.Lstat(path)
+	return os.Lstat(path)
 }
 
 // ReadDir reads directory contents.
 func ReadDir(path string) ([]fs.DirEntry, error) {
-	return sandbox.ReadDir(path)
+	return os.ReadDir(path)
 }
 
 // Mkdir creates a directory.
 func Mkdir(path string, perm os.FileMode) error {
-	return sandbox.Mkdir(path, perm)
+	return os.Mkdir(path, perm)
 }
 
 // MkdirAll creates a directory and parents.
 func MkdirAll(path string, perm os.FileMode) error {
-	return sandbox.MkdirAll(path, perm)
+	return os.MkdirAll(path, perm)
 }
 
 // Remove removes a file or empty directory.
 func Remove(path string) error {
-	return sandbox.Remove(path)
+	return os.Remove(path)
 }
 
 // RemoveAll removes a path recursively.
 func RemoveAll(path string) error {
-	return sandbox.RemoveAll(path)
+	return os.RemoveAll(path)
 }
 
 // Rename renames a file.
 func Rename(oldpath, newpath string) error {
-	return sandbox.Rename(oldpath, newpath)
+	return os.Rename(oldpath, newpath)
 }
 
-// Copy copies a file.
+// Copy copies a file, preserving its mode.
 func Copy(src, dst string) error {
-	return sandbox.Copy(src, dst)
+	return CopyFile(src, dst, true)
 }
 
 // Getwd returns current working directory.
 func Getwd() (string, error) {
-	return sandbox.Getwd()
+	return os.Getwd()
 }
 
 // Chdir changes directory.
 func Chdir(path string) error {
-	return sandbox.Chdir(path)
+	return os.Chdir(path)
 }
 
 // CopyFile copies a file with mode preservation option.

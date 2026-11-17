@@ -56,10 +56,10 @@ Estado del árbol tal como está hoy:
 | `go test ./...` | ❌ Falla en 4 paquetes (detalle abajo). |
 | Motor v1 | Vivo: `pkg/gutils` (actor + protocolo NDJSON), `cmd/homunculi`, 5 applets `goblin*`. |
 | Capa de aislamiento | **Aún no implementada**: no existe `ggroups`. Hoy se usa `setpgid` + death-pipe. |
-| Restos de WASM | `pkg/sandbox/`, `pkg/sandbox/sandbox_test.go` y 9 archivos `*_wasm.go`. |
-| Documentación | El README anterior describía go-busybox (57 applets, TinyGo, 387/387). Este archivo lo reemplaza. |
-| Applets huérfanos | `cut`, `diff`, `grep`, `printf`, `sed`, `sort`, `tr`, `uniq` existen en `pkg/applets/` pero **no** están en el registry de `cmd/goblin` ni tienen `cmd/<applet>`. |
-| Git | Commit inicial `a45d358` (*last commit antes q refactor grande*). Remote: `git@github-entezapallo:entezapallo/goblin.git`. |
+| Restos de WASM | ✅ Eliminados: `pkg/sandbox/` y los 9 `*_wasm.go`. `pkg/core/fs` y `awk` dejaron de depender del sandbox. |
+| Documentación | Este README reemplaza al de go-busybox (57 applets, TinyGo, 387/387). |
+| Applets huérfanos | ✅ Conectados: `cut`, `diff`, `grep`, `printf`, `sed`, `sort`, `tr`, `uniq` están en el registry (51 entradas) y tienen `cmd/<applet>` propio. |
+| Git | Commit inicial `a45d358` (*last commit antes q refactor grande*). La limpieza de la fase 1 está sin commitear. Remote: `git@github-entezapallo:entezapallo/goblin.git`. |
 | `dev/` | Repo git anidado vacío (solo `.git/`, sin commits). Ignorado vía `.gitignore`; no participa del proyecto. |
 
 ### Fallos de test conocidos (preexistentes al refactor)
@@ -79,12 +79,12 @@ Estos se arreglan **antes** de la migración: sin baseline verde no se puede dis
 
 ```
 goblin/
-├── cmd/                     # 40 entry points
-│   ├── goblin/              # dispatcher multi-call (37 applets en su registry)
+├── cmd/                     # 47 entry points
+│   ├── goblin/              # dispatcher multi-call (51 applets en su registry)
 │   ├── homunculi/           # servidor NDJSON + death-pipe del diseño v1
-│   └── <applet>/            # ash, awk, cat, cp, echo, find, free, gzip, ...
+│   └── <applet>/            # ash, awk, cat, cp, cut, diff, echo, find, grep, ...
 ├── pkg/
-│   ├── applets/             # ~53 paquetes (37 del registry + helpers + huérfanos)
+│   ├── applets/             # 53 paquetes (todos los del registry + helpers)
 │   │   ├── ash/             # intérprete POSIX heredado (~11.900 líneas, 349/349)
 │   │   ├── procutil/        # señales y matching de /proc (del fork)
 │   │   ├── gprocutil/       # ReadStat/Children/Descendants (nuevo)
@@ -95,7 +95,6 @@ goblin/
 │   ├── gutils/              # motor v1: State/Terms/Event, Call/Serve, actor, Spawn(setpgid)
 │   ├── discover/            # enumera sockets por PID en $XDG_RUNTIME_DIR/goblin
 │   ├── history/             # append de history.jsonl + Compact
-│   ├── sandbox/             # ⚠ resto de WASM, a borrar
 │   ├── integration/, testutil/, testdata/
 ├── mds/                     # diseño target (ver §6)
 ├── docs/SPEC.md             # especificación heredada del fork
@@ -105,7 +104,7 @@ goblin/
 └── README.md                # este archivo
 ```
 
-Binarios sueltos en la raíz (`goblin`, `homunculi`, `greeting`, `infobash.log`, `info.bash`, `structure.txt`) son artefactos, no fuente.
+Los artefactos sueltos de la raíz y los scripts one-off (`cleanup.sh`, `scripts/`, `info.bash`, `structure.txt`, `greeting`) se borraron en la fase 1 y se agregaron a `.gitignore`.
 
 ---
 
@@ -137,9 +136,9 @@ Lo que sí se retira: `Serve`/`Call`, el socket NDJSON, el mapa `workers` del ac
 
 Cada fase termina con `go build ./...` verde y, desde la fase 2, `go test ./...` verde. Nunca borrar dos piezas sin compilar en el medio.
 
-0. **Checkpoint**(hecho): commit `a45d358` antes del refactor.
-1. **Higiene sin cambiar comportamiento:** borrar `pkg/sandbox/`, los 9 `*_wasm.go` y los artefactos sueltos; limpiar código muerto (`itoa`/`intToString` en `history.go`, cheque `if sock == ""` en `goblinsubmit`, comentarios duplicados/stale); `gofmt` + `go vet`; conectar los 8 applets huérfanos.
-2. **Baseline verde:** arreglar `testutil.go:200`, recuperar/skippear el fixture `.config`, e investigar `TestStrftime` y `TestTime`.
+0. **Checkpoint** (hecho): commit `a45d358` antes del refactor.
+1. **Higiene sin cambiar comportamiento** (hecho): borrados `pkg/sandbox/`, los 9 `*_wasm.go` y los artefactos sueltos; limpio código muerto; `gofmt` en todo el árbol; conectados los 8 applets huérfanos (registry de 51 entradas). Sin regresiones: mismos 4 fallos preexistentes, `go build` verde.
+2. **Baseline verde** (pendiente): arreglar `testutil.go:200`, recuperar/skippear el fixture `.config`, e investigar `TestStrftime` y `TestTime`.
 3. **Núcleo nuevo antes de sacar el viejo:** implementar `gg` (*discover/create/limit/kill/freeze/events/stat*) y demostrar la garantía dura con un job de juguete.
 4. **Retirar el motor v1:** borrar `gutils`, el socket y `homunculi`; **reescribir los 5 verbos** sobre cgroupfs; `discover` pasa a leer manifiestos; renombrar `cmd/goblin` → `cmd/grimoire` para liberar el nombre.
 5. **Reasentar el fork:** applets mecanismo y stdlib; único Go nuevo justificado, `SpawnInner`; `gprocutil` gana `Ancestors`/`Subtree` **y el campo `starttime`** (hoy `ReadStat` no lo expone, aunque los docs lo asumen).

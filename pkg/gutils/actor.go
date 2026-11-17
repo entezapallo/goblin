@@ -4,11 +4,11 @@
 package gutils
 
 import (
+	"goblin/pkg/applets/gprocutil"
 	"io"
 	"os"
+	"strconv"
 	"syscall"
-  "strconv"
-	"goblin/pkg/applets/gprocutil"
 )
 
 // worker es lo que el actor sabe de un job lanzado por submit.

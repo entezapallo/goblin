@@ -14,18 +14,18 @@ import (
 
 // Options holds cp command options.
 type Options struct {
-	Recursive     bool   // -r, -R: copy directories recursively
-	Force         bool   // -f: force overwrite
-	Interactive   bool   // -i: prompt before overwrite
-	Preserve      bool   // -p: preserve mode, ownership, timestamps
-	NoClobber     bool   // -n: do not overwrite existing files
-	Verbose       bool   // -v: verbose output
+	Recursive     bool // -r, -R: copy directories recursively
+	Force         bool // -f: force overwrite
+	Interactive   bool // -i: prompt before overwrite
+	Preserve      bool // -p: preserve mode, ownership, timestamps
+	NoClobber     bool // -n: do not overwrite existing files
+	Verbose       bool // -v: verbose output
 	CopyToDir     string
 	NoTargetDir   bool
-	NoDereference bool // -P, -d: don't follow symlinks
-	Dereference   bool // -L: follow all symlinks
-	DerefArgs     bool // -H: follow only command-line symlinks
-	Parents       bool // --parents: preserve source path structure
+	NoDereference bool                   // -P, -d: don't follow symlinks
+	Dereference   bool                   // -L: follow all symlinks
+	DerefArgs     bool                   // -H: follow only command-line symlinks
+	Parents       bool                   // --parents: preserve source path structure
 	hardLinks     map[hardLinkKey]string // track inode -> dest for hard link preservation
 }
 

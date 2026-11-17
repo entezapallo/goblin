@@ -42,17 +42,13 @@ type Terms struct {
 // se escribe una línea, se lee una línea, se cierra. Sin ID de correlación
 // todavía — se puede agregar después sin romper el protocolo.
 type Event struct {
-	Type  string   `json:"type"`            // "submit", "pause", "resume", "kill", "status", "list", "done", "fail"
+	Type  string   `json:"type"` // "submit", "pause", "resume", "kill", "status", "list", "done", "fail"
 	PID   int      `json:"pid,omitempty"`
-	Cmd   []string `json:"cmd,omitempty"`   // solo para "submit": comando a lanzar
+	Cmd   []string `json:"cmd,omitempty"` // solo para "submit": comando a lanzar
 	State State    `json:"state,omitempty"`
 	Error string   `json:"error,omitempty"`
 }
 
-// SocketPath resuelve el path del unix socket del goblin actual.
-// Fallback simple basado en PPID, como marca el HANDOFF: pkg/discover
-// lo va a reemplazar más adelante por descubrimiento real multi-goblin
-// en $XDG_RUNTIME_DIR/goblin/.
 // SocketPath resuelve el path del unix socket del goblin actual.
 // Si GOBLIN_SOCKET está seteada, se usa tal cual (override manual, útil
 // para debugging/pruebas). Si no, fallback simple basado en PPID, como
@@ -68,7 +64,7 @@ func SocketPath() string {
 		runtimeDir = os.TempDir()
 	}
 	return fmt.Sprintf("%s/goblin/%d.sock", runtimeDir, os.Getppid())
-}// Call envía un Event al goblin en socketPath y espera la respuesta.
+} // Call envía un Event al goblin en socketPath y espera la respuesta.
 // Una conexión por llamada: conecta, escribe una línea JSON, lee una
 // línea JSON de vuelta, cierra.
 func Call(socketPath string, req Event) (Event, error) {

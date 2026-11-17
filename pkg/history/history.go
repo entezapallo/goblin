@@ -5,12 +5,12 @@
 package history
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
-	"bytes"
 )
 
 const retentionPeriod = 30 * 24 * time.Hour
@@ -23,7 +23,8 @@ func GoblinLogPath(pid int) string {
 		runtimeDir = os.TempDir()
 	}
 	return filepath.Join(runtimeDir, "goblin", strconv.Itoa(pid)+".history.jsonl")
-	}
+}
+
 // AppendGoblinLog agrega una línea al log detallado del goblin pid.
 // O_APPEND garantiza que la escritura no se entrelaza con otras,
 // siempre que la línea entre en un solo write() del kernel — de sobra
@@ -116,30 +117,4 @@ func appendLine(path string, v any) error {
 
 	enc := json.NewEncoder(f) // Encode ya agrega \n al final de cada línea
 	return enc.Encode(v)
-}
-
-func itoa(n int) string {
-	return json.Number(intToString(n)).String()
-}
-
-func intToString(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
 }

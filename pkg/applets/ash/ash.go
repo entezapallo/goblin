@@ -38,7 +38,7 @@ import (
 //
 // The shell supports pipelines, redirections (>, >>, <, 2>, &>, |),
 // control flow (if/elif/else/fi, while/until/do/done, for/in/do/done,
-// case/esac), functions, subshells, command substitution ($() and ``),
+// case/esac), functions, subshells, command substitution ($() and “),
 // arithmetic expansion ($(())), parameter expansion (${var:-default} etc.),
 // here-documents (<<EOF), traps and signal handling, and most POSIX
 // builtins (cd, export, read, test, [, echo, printf, kill, etc.).
@@ -1332,6 +1332,7 @@ func (r *runner) withRedirections(spec commandSpec, fn func() (int, bool)) (int,
 	r.fdReaders = savedFdReaders
 	return code, exit
 }
+
 // runRunScript handles run...nur blocks — el bloque que en gsh define
 // un job para goblin. Primera versión: solo reconoce el bloque y corre
 // el cuerpo como script normal, sin conectar a gutils.Call todavía.
@@ -5092,7 +5093,7 @@ func (r *runner) runPipeline(segments []pipelineSegment) int {
 	if len(segments) == 2 {
 		leftSeg := strings.TrimSpace(segments[0].seg)
 		rightSeg := strings.TrimSpace(segments[1].seg)
-		// Only use fast path when right side is a subshell (...) 
+		// Only use fast path when right side is a subshell (...)
 		// Brace groups and other commands may have external commands that
 		// consume stdin when passed as bytes.Reader
 		isSubshellRight := len(rightSeg) >= 2 && rightSeg[0] == '(' && rightSeg[len(rightSeg)-1] == ')'
@@ -5428,28 +5429,28 @@ func (r *runner) runPipeline(segments []pipelineSegment) int {
 			}
 			lineBase := r.currentLine + s.lineOffset
 			sub := &runner{
-				stdio:      &core.Stdio{In: s.prevReader, Out: stdout, Err: stderr},
-				vars:       copyStringMap(r.vars),
-				exported:   copyBoolMap(r.exported),
-				readonly:   copyBoolMap(r.readonly),
-				funcs:      copyStringMap(r.funcs),
-				funcLines:  copyIntMap(r.funcLines),
-				aliases:    copyStringMap(r.aliases),
-				options:    copyBoolMap(r.options),
-				traps:      copyStringMap(r.traps),
-				ignored:    copySignalMap(r.ignored),
-				positional: append([]string{}, r.positional...),
-				scriptName: r.scriptName,
-				argv0:      r.argv0,
-				jobs:       map[int]*job{},
-				jobByPid:   map[int]int{},
-				nextJobID:  1,
-				fdReaders:      copyFdReaders(r.fdReaders),
-				fdWriters:      copyFdWriters(r.fdWriters),
-				signalCh:       make(chan os.Signal, 8),
-				scriptCache:    r.scriptCache,
+				stdio:            &core.Stdio{In: s.prevReader, Out: stdout, Err: stderr},
+				vars:             copyStringMap(r.vars),
+				exported:         copyBoolMap(r.exported),
+				readonly:         copyBoolMap(r.readonly),
+				funcs:            copyStringMap(r.funcs),
+				funcLines:        copyIntMap(r.funcLines),
+				aliases:          copyStringMap(r.aliases),
+				options:          copyBoolMap(r.options),
+				traps:            copyStringMap(r.traps),
+				ignored:          copySignalMap(r.ignored),
+				positional:       append([]string{}, r.positional...),
+				scriptName:       r.scriptName,
+				argv0:            r.argv0,
+				jobs:             map[int]*job{},
+				jobByPid:         map[int]int{},
+				nextJobID:        1,
+				fdReaders:        copyFdReaders(r.fdReaders),
+				fdWriters:        copyFdWriters(r.fdWriters),
+				signalCh:         make(chan os.Signal, 8),
+				scriptCache:      r.scriptCache,
 				scriptLinesCache: r.scriptLinesCache,
-				caseCache:      r.caseCache,
+				caseCache:        r.caseCache,
 			}
 			sub.currentLine = lineBase
 			sub.lineOffset = lineBase - 1

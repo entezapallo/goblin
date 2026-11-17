@@ -3,9 +3,6 @@
 package goblinsubmit
 
 import (
-	"errors"
-	//"strings"
-
 	"goblin/pkg/core"
 	"goblin/pkg/gutils"
 )
@@ -21,9 +18,6 @@ func Run(stdio *core.Stdio, args []string) int {
 	}
 
 	sock := gutils.SocketPath()
-	if sock == "" {
-		return core.FileError(stdio, "goblinsubmit", "socket", errors.New("no se pudo resolver el socket del goblin"))
-	}
 
 	resp, err := gutils.Call(sock, gutils.Event{
 		Type: "submit",

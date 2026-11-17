@@ -18,13 +18,13 @@ import (
 const maxArchiveBytes = int64(64 << 20)
 
 type tarOpts struct {
-	create   bool
-	extract  bool
-	list     bool
-	verbose  bool
-	gzipped  bool
-	file     string // archive filename, "-" = stdin/stdout
-	dir      string // -C directory
+	create  bool
+	extract bool
+	list    bool
+	verbose bool
+	gzipped bool
+	file    string // archive filename, "-" = stdin/stdout
+	dir     string // -C directory
 }
 
 // Run executes the tar command with the given arguments.
