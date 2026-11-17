@@ -1,6 +1,6 @@
-<img src=".media/logo.jpeg" alt="Logo de Bergënot, grupo de música" width="160" align="rigth" hspace="24" vspace="8" />
 
-# goblin
+
+# goblin <img src=".media/logo.jpeg" alt="Logo de Bergënot, grupo de música" width="160" align="rigth" hspace="24" vspace="8" />
 
 > Una abstracción de scripts con semántica de **contracts de illumos**, construida en estilo Unix sobre **cgroups v2**: shell POSIX + un puñado de applets chiquitos, propios y compatibles, que dan a cada script un subárbol de procesos con límites, pausa, muerte confiable y eventos observables.
 
