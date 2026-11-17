@@ -1,15 +1,11 @@
-
-<div align="right">
-  <img src=".media/logo.jpeg" alt="Logo de Bergënot" width="160" />
-</div>
-
-# goblin
+# goblin <img src=".media/logo.jpeg" alt="Logo de Bergënot" align="right" height="138" />
 > a lesser daemon
+
 Una abstracción de scripts con semántica de **contracts de illumos**, construida en estilo Unix sobre **cgroups v2**: shell POSIX + un puñado de applets chiquitos, propios y compatibles, que dan a cada script un subárbol de procesos con límites, pausa, muerte confiable y eventos observables.
 
 `goblin` es un hard fork podado de [`rcarmo/go-busybox`](https://github.com/rcarmo/go-busybox) (MIT). El fork aporta el **mecanismo** — un `ash` POSIX real y probado, parsing de `/proc`, applets de señales y el stdlib de scripting. `goblin` aporta la **política**: qué significa cada estado, evento y señal en términos de un contrato de ciclo de vida. El logo es de **Bergënot**, grupo de música.
 
-<br clear="all" />
+
 
 ---
 
