@@ -1,0 +1,168 @@
+// Package free implements the free command.
+package free
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+
+	"goblin/pkg/core"
+)
+
+type unit int64
+
+const (
+	unitByte unit = 1
+	unitKB        = 1024
+	unitMB        = 1024 * 1024
+	unitGB        = 1024 * 1024 * 1024
+)
+
+// Run executes the free command with the given arguments.
+//
+// Supported flags:
+//
+//	-b    Display amounts in bytes
+//	-k    Display amounts in kibibytes (default)
+//	-m    Display amounts in mebibytes
+//	-g    Display amounts in gibibytes
+//	-h    Human-readable output with automatic unit selection
+//
+// Reads memory statistics from /proc/meminfo.
+func Run(stdio *core.Stdio, args []string) int {
+	scale := unit(unitKB)
+	human := false
+	for _, arg := range args {
+		switch arg {
+		case "-b":
+			scale = unitByte
+		case "-k":
+			scale = unitKB
+		case "-m":
+			scale = unitMB
+		case "-g":
+			scale = unitGB
+		case "-h":
+			human = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return core.UsageError(stdio, "free", "invalid option -- '"+strings.TrimPrefix(arg, "-")+"'")
+			}
+		}
+	}
+	stats, err := readMeminfo()
+	if err != nil {
+		stdio.Errorf("free: %v\n", err)
+		return core.ExitFailure
+	}
+	stdio.Println("              total        used        free      shared  buff/cache   available")
+	memUsed := stats.MemTotal - stats.MemFree - stats.Buffers - stats.Cached - stats.SReclaimable
+	buffCache := stats.Buffers + stats.Cached + stats.SReclaimable
+	if human {
+		stdio.Printf("Mem:%15s%12s%12s%12s%12s%12s\n",
+			padHuman(formatHuman(stats.MemTotal)),
+			padHuman(formatHuman(memUsed)),
+			padHuman(formatHuman(stats.MemFree)),
+			padHuman(formatHuman(stats.Shmem)),
+			padHuman(formatHuman(buffCache)),
+			padHuman(formatHuman(stats.MemAvailable)),
+		)
+		stdio.Printf("Swap:%14s%12s%12s\n",
+			padHuman(formatHuman(stats.SwapTotal)),
+			padHuman(formatHuman(stats.SwapTotal-stats.SwapFree)),
+			padHuman(formatHuman(stats.SwapFree)),
+		)
+		return core.ExitSuccess
+	}
+	stdio.Printf("Mem:%15d%12d%12d%12d%12d%12d\n",
+		convertUnit(stats.MemTotal, scale),
+		convertUnit(memUsed, scale),
+		convertUnit(stats.MemFree, scale),
+		convertUnit(stats.Shmem, scale),
+		convertUnit(buffCache, scale),
+		convertUnit(stats.MemAvailable, scale),
+	)
+	stdio.Printf("Swap:%14d%12d%12d\n",
+		convertUnit(stats.SwapTotal, scale),
+		convertUnit(stats.SwapTotal-stats.SwapFree, scale),
+		convertUnit(stats.SwapFree, scale),
+	)
+	return core.ExitSuccess
+}
+
+type memInfo struct {
+	MemTotal     int64
+	MemFree      int64
+	MemAvailable int64
+	Buffers      int64
+	Cached       int64
+	SReclaimable int64
+	Shmem        int64
+	SwapTotal    int64
+	SwapFree     int64
+}
+
+func readMeminfo() (memInfo, error) {
+	data, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return memInfo{}, err
+	}
+	var info memInfo
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		key := strings.TrimSuffix(fields[0], ":")
+		value, _ := strconv.ParseInt(fields[1], 10, 64)
+		switch key {
+		case "MemTotal":
+			info.MemTotal = value * 1024
+		case "MemFree":
+			info.MemFree = value * 1024
+		case "MemAvailable":
+			info.MemAvailable = value * 1024
+		case "Buffers":
+			info.Buffers = value * 1024
+		case "Cached":
+			info.Cached = value * 1024
+		case "SReclaimable":
+			info.SReclaimable = value * 1024
+		case "Shmem":
+			info.Shmem = value * 1024
+		case "SwapTotal":
+			info.SwapTotal = value * 1024
+		case "SwapFree":
+			info.SwapFree = value * 1024
+		}
+	}
+	return info, nil
+}
+
+func convertUnit(value int64, scale unit) int64 {
+	if scale <= 0 {
+		return value
+	}
+	return value / int64(scale)
+}
+
+func formatHuman(value int64) string {
+	switch {
+	case value >= int64(unitGB):
+		return fmt.Sprintf("%.1fG", float64(value)/float64(unitGB))
+	case value >= int64(unitMB):
+		return fmt.Sprintf("%.1fM", float64(value)/float64(unitMB))
+	case value >= int64(unitKB):
+		return fmt.Sprintf("%.1fK", float64(value)/float64(unitKB))
+	default:
+		return fmt.Sprintf("%dB", value)
+	}
+}
+
+func padHuman(value string) string {
+	if strings.HasSuffix(value, "B") {
+		return strings.TrimSuffix(value, "B")
+	}
+	return value
+}

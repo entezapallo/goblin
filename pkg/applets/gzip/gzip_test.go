@@ -1,0 +1,37 @@
+package gzip_test
+
+import (
+	"os"
+	"testing"
+
+	"goblin/pkg/applets/gzip"
+	"goblin/pkg/core"
+	"goblin/pkg/testutil"
+)
+
+func TestGzip(t *testing.T) {
+	tests := []testutil.AppletTestCase{
+		{
+			Name:     "stdin_to_stdout",
+			Args:     []string{},
+			Input:    "hello\n",
+			WantCode: core.ExitSuccess,
+		},
+		{
+			Name:     "basic",
+			Args:     []string{"input.txt"},
+			WantCode: core.ExitSuccess,
+			Files: map[string]string{
+				"input.txt": "hello\n",
+			},
+			Check: func(t *testing.T, dir string) {
+				testutil.AssertFileExists(t, dir+"/input.txt.gz")
+				_, err := os.Stat(dir + "/input.txt")
+				if err == nil {
+					t.Fatalf("expected input.txt to be removed")
+				}
+			},
+		},
+	}
+	testutil.RunAppletTests(t, gzip.Run, tests)
+}

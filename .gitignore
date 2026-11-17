@@ -1,0 +1,5 @@
+/_build/
+/coverage.out
+/busybox-reference/
+pkg/testdata/busybox-testsuite/runtest-tempdir-links/
+/dev/
