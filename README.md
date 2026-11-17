@@ -1,4 +1,4 @@
-<img src=".media/logo.jpeg" alt="Logo de Bergënot, grupo de música" width="160" align="left" hspace="24" vspace="8" />
+<img src=".media/logo.jpeg" alt="Logo de Bergënot, grupo de música" width="160" align="rigth" hspace="24" vspace="8" />
 
 # goblin
 
