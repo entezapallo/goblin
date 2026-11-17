@@ -23,8 +23,11 @@ func TestAsh(t *testing.T) {
 			WantOut:  "ok\n",
 		},
 		{
+			// `FOO=bar echo $FOO` expandiría $FOO antes de aplicar el
+			// assignment (semántica POSIX), así que el caso usa '-c' con
+			// ';' para probar realmente la asignación.
 			Name:     "assignment",
-			Args:     []string{"FOO=bar", "echo", "$FOO"},
+			Args:     []string{"-c", "FOO=bar; echo $FOO"},
 			WantCode: core.ExitSuccess,
 			WantOut:  "bar\n",
 		},
@@ -211,9 +214,11 @@ func TestAsh(t *testing.T) {
 			WantOut:  "ok\n",
 		},
 		{
+			// Tras unalias, `ll` ya no existe: POSIX devuelve 127
+			// (command not found), no 1.
 			Name:     "unalias_builtin",
 			Args:     []string{"-c", "alias ll='echo'; unalias ll; ll ok"},
-			WantCode: core.ExitFailure,
+			WantCode: 127,
 		},
 		{
 			Name:     "exec_builtin",
@@ -241,8 +246,10 @@ func TestAsh(t *testing.T) {
 			WantErr:  "+ echo ok",
 		},
 		{
+			// Entorno vacío a propósito: `export -p` debe listar solo FOO.
 			Name:     "export_p_builtin",
 			Args:     []string{"-c", "export FOO=bar; export -p"},
+			Env:      []string{},
 			WantCode: core.ExitSuccess,
 			WantOut:  "export FOO=bar\n",
 		},

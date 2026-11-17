@@ -1,41 +1,34 @@
-// Package goblinkill es el cliente NDJSON delgado para el verbo "kill":
-// le pide al goblin corriendo que mate el job con el PID dado (y, por
-// la garantía dura del sistema, todo lo que gestiona con él).
+// Package goblinkill es el cliente del verbo "kill": pide al goblin que
+// mate el worker con el PID dado (y todo su subárbol).
 package goblinkill
 
 import (
-	"errors"
 	"strconv"
 
 	"goblin/pkg/core"
-	"goblin/pkg/gutils"
+	"goblin/pkg/verbs"
 )
 
 // Run ejecuta goblinkill con los argumentos dados.
 //
 // Uso:
 //
-//	goblinkill PID
+//	goblinkill [-g ID] PID
 func Run(stdio *core.Stdio, args []string) int {
-	if len(args) < 1 {
+	ref, rest := verbs.ParseRef(args)
+	if len(rest) < 1 {
 		return core.UsageError(stdio, "goblinkill", "falta PID")
 	}
-	pid, err := strconv.Atoi(args[0])
+	pid, err := strconv.Atoi(rest[0])
 	if err != nil {
-		return core.UsageError(stdio, "goblinkill", "PID inválido: "+args[0])
+		return core.UsageError(stdio, "goblinkill", "PID inválido: "+rest[0])
 	}
 
-	sock := gutils.SocketPath()
-	if sock == "" {
-		return core.FileError(stdio, "goblinkill", "socket", errors.New("no se pudo resolver el socket del goblin"))
-	}
-
-	resp, err := gutils.SimpleVerb(sock, "kill", pid)
+	resp, err := verbs.Mutate(ref, "kill", pid, nil)
 	if err != nil {
 		stdio.Errorf("goblinkill: %v\n", err)
 		return core.ExitFailure
 	}
-
 	stdio.Println(resp)
 	return core.ExitSuccess
 }

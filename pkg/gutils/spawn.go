@@ -1,26 +1,40 @@
 // pkg/gutils/spawn.go
 //
-// Spawn es el mecanismo de lanzamiento: fork/exec real de un job, en su
-// propio grupo de procesos (necesario para poder señalizar/matar el
-// grupo entero, no solo el líder). No vigila el proceso después de
-// lanzarlo — eso es responsabilidad de quien consuma el estado (el TUI,
-// vía list/status), no de gutils.
+// SpawnInto es el lanzamiento de un worker dentro de su cgroup. El fd del
+// cgroup se pasa a startstopdaemon.SpawnInner (UseCgroupFD + Pdeathsig);
+// gutils no reimplementa exec.Command. Las salidas se entregan al actor
+// para alimentar las reglas de texto sobre stdout/stderr.
 package gutils
 
 import (
+	"fmt"
+	"io"
+	"os"
 	"os/exec"
-	"syscall"
+
+	"goblin/pkg/applets/startstopdaemon"
 )
 
-// Spawn lanza cmd[0] con cmd[1:] como argumentos, en su propio grupo de
-// procesos, y devuelve el *exec.Cmd ya arrancado (Start(), no Run() —
-// no bloquea esperando a que termine).
-func Spawn(cmd []string) (*exec.Cmd, error) {
-	c := exec.Command(cmd[0], cmd[1:]...)
-	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	if err := c.Start(); err != nil {
-		return nil, err
+// SpawnInto lanza argv[0] con argv[1:] dentro de cgroupPath, en-start sin
+// esperar a que termine, y devuelve el *os.Process ya arrancado. El worker
+// hereda GOBLIN_ID para poder direccionar al goblin que lo creó.
+func SpawnInto(id, cgroupPath string, argv []string, stdout, stderr io.Writer) (*exec.Cmd, error) {
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("goblin: comando vacío")
 	}
-	return c, nil
+	dir, err := os.Open(cgroupPath) // #nosec G304 -- cgroup path viene del manifiesto
+	if err != nil {
+		return nil, fmt.Errorf("goblin: abrir cgroup %s: %w", cgroupPath, err)
+	}
+	defer dir.Close()
+
+	env := append(os.Environ(), "GOBLIN_ID="+id)
+	return startstopdaemon.SpawnInner(startstopdaemon.SpawnConfig{
+		Binary:   argv[0],
+		Args:     argv[1:],
+		CgroupFD: int(dir.Fd()),
+		Env:      env,
+		Stdout:   stdout,
+		Stderr:   stderr,
+	})
 }

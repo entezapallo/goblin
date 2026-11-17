@@ -448,6 +448,9 @@ func runGoAwk(stdio *core.Stdio, programName string, program string, files []str
 		"or": func(a, b float64) float64 {
 			return float64(uint32(a) | uint32(b))
 		},
+		// goawk no trae strftime (es una extensión de gawk). Registrarlo
+		// acá hace que el parser y el intérpreter lo reconozcan.
+		"strftime": nativeStrftime,
 	}
 	parserConfig := &parser.ParserConfig{Funcs: funcs}
 	prog, err := parser.ParseProgram([]byte(program), parserConfig)
@@ -2228,38 +2231,7 @@ func evalExpr(e *expr, state *awkState) (string, float64) {
 			} else {
 				t = time.Now()
 			}
-			var b strings.Builder
-			for i := 0; i < len(fmtStr); i++ {
-				c := fmtStr[i]
-				if c != '%' || i+1 >= len(fmtStr) {
-					b.WriteByte(c)
-					continue
-				}
-				i++
-				n := fmtStr[i]
-				switch n {
-				case '%':
-					b.WriteByte('%')
-				case 's':
-					b.WriteString(strconv.FormatInt(t.Unix(), 10))
-				case 'j':
-					b.WriteString(fmt.Sprintf("%03d", t.YearDay()))
-				case 'u':
-					// Monday=1..7
-					uval := int(t.Weekday())
-					if uval == 0 {
-						uval = 7
-					}
-					b.WriteString(strconv.Itoa(uval))
-				case 'w':
-					b.WriteString(strconv.Itoa(int(t.Weekday())))
-				default:
-					// delegate single-directive conversion to Go layout and format
-					layout := convertStrftime("%" + string(n))
-					b.WriteString(t.Format(layout))
-				}
-			}
-			out := b.String()
+			out := formatStrftime(t, fmtStr)
 			return out, parseNumber(out)
 		case "gensub":
 			// gensub(regex, repl, how [, target]) -> return modified string
@@ -2416,6 +2388,48 @@ func evalExpr(e *expr, state *awkState) (string, float64) {
 	default:
 		return "", 0
 	}
+}
+
+// nativeStrftime es la implementación de strftime que se registra en goawk.
+// Con timestamp se usa UTC para coincidir con BusyBox en epoch 0.
+func nativeStrftime(format string, args ...float64) string {
+	if len(args) > 0 {
+		return formatStrftime(time.Unix(int64(args[0]), 0).UTC(), format)
+	}
+	return formatStrftime(time.Now(), format)
+}
+
+// formatStrftime implementa los directivos que BusyBox awk soporta y
+// delega el resto a convertStrftime.
+func formatStrftime(t time.Time, fmtStr string) string {
+	var b strings.Builder
+	for i := 0; i < len(fmtStr); i++ {
+		c := fmtStr[i]
+		if c != '%' || i+1 >= len(fmtStr) {
+			b.WriteByte(c)
+			continue
+		}
+		i++
+		switch fmtStr[i] {
+		case '%':
+			b.WriteByte('%')
+		case 's':
+			b.WriteString(strconv.FormatInt(t.Unix(), 10))
+		case 'j':
+			b.WriteString(fmt.Sprintf("%03d", t.YearDay()))
+		case 'u':
+			uval := int(t.Weekday())
+			if uval == 0 {
+				uval = 7
+			}
+			b.WriteString(strconv.Itoa(uval))
+		case 'w':
+			b.WriteString(strconv.Itoa(int(t.Weekday())))
+		default:
+			b.WriteString(t.Format(convertStrftime("%" + string(fmtStr[i]))))
+		}
+	}
+	return b.String()
 }
 
 // convert a strftime-style format to Go time layout for common directives
@@ -2644,38 +2658,7 @@ func evalFunc(e *expr, state *awkState) (string, float64) {
 		} else {
 			t = time.Now()
 		}
-		var b strings.Builder
-		for i := 0; i < len(fmtStr); i++ {
-			c := fmtStr[i]
-			if c != '%' || i+1 >= len(fmtStr) {
-				b.WriteByte(c)
-				continue
-			}
-			i++
-			n := fmtStr[i]
-			switch n {
-			case '%':
-				b.WriteByte('%')
-			case 's':
-				b.WriteString(strconv.FormatInt(t.Unix(), 10))
-			case 'j':
-				b.WriteString(fmt.Sprintf("%03d", t.YearDay()))
-			case 'u':
-				// Monday=1..7
-				uval := int(t.Weekday())
-				if uval == 0 {
-					uval = 7
-				}
-				b.WriteString(strconv.Itoa(uval))
-			case 'w':
-				b.WriteString(strconv.Itoa(int(t.Weekday())))
-			default:
-				// delegate single-directive conversion to Go layout and format
-				layout := convertStrftime("%" + string(n))
-				b.WriteString(t.Format(layout))
-			}
-		}
-		out := b.String()
+		out := formatStrftime(t, fmtStr)
 		return out, parseNumber(out)
 
 	case "split":

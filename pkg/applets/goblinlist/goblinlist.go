@@ -1,14 +1,13 @@
-// Package goblinlist es el cliente NDJSON delgado para el verbo "list":
-// pide al goblin corriendo (vía gutils.Call) la lista de jobs que
-// gestiona, y la imprime. Mismo patrón Run(stdio,args) que el resto
-// del árbol.
+// Package goblinlist es la consulta de goblins vivos. No habla por socket:
+// lee los manifiestos y verifica que el cgroup siga existiendo (fase
+// híbrida: consultas a cgroupfs, mutaciones por socket).
 package goblinlist
 
 import (
-	"errors"
+	"fmt"
 
 	"goblin/pkg/core"
-	"goblin/pkg/gutils"
+	"goblin/pkg/discover"
 )
 
 // Run ejecuta goblinlist con los argumentos dados.
@@ -16,18 +15,16 @@ import (
 // Uso:
 //
 //	goblinlist
+//
+// Imprime una línea por goblin: ID PID STATE CGROUP SOCKET.
 func Run(stdio *core.Stdio, args []string) int {
-	sock := gutils.SocketPath()
-	if sock == "" {
-		return core.FileError(stdio, "goblinlist", "socket", errors.New("no se pudo resolver el socket del goblin"))
-	}
-
-	resp, err := gutils.SimpleVerb(sock, "list", 0)
+	goblins, err := discover.Discover()
 	if err != nil {
 		stdio.Errorf("goblinlist: %v\n", err)
 		return core.ExitFailure
 	}
-
-	stdio.Println(resp)
+	for _, g := range goblins {
+		fmt.Fprintf(stdio.Out, "%s\t%d\t%s\t%s\t%s\n", g.ID, g.PID, g.State, g.CGroup, g.SocketPath)
+	}
 	return core.ExitSuccess
 }

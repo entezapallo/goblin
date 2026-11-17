@@ -1,0 +1,296 @@
+#!/bin/sh
+# gg — superset de cgroups v2 en shell POSIX, estilo Unix, agnóstico a
+# systemd/init. Descubre el mount de cgroup2 y el ancestro escribible más
+# cercano sin procesos internos (regla "no internal process" de cgroup v2),
+# y expone comandos pequeños que operan sobre archivos de cgroupfs.
+#
+# Todo lo que imprime es texto de una línea por registro: salida limpia para
+# pipes. Los errores van a stderr con código de salida distinto de cero.
+
+set -eu
+
+PROG=${0##*/}
+
+die() {
+    printf '%s: %s\n' "$PROG" "$*" >&2
+    exit 1
+}
+
+usage() {
+    cat <<EOF
+uso: gg COMANDO [ARG...]
+
+  discover              imprime el ancestro cgroup2 escribible sin procesos internos
+  create NAME           crea un grupo, habilita controladores en el padre
+  list                  lista los grupos creados
+  enter NAME PID        mueve un proceso al grupo
+  limit NAME KEY=VAL... memory=2G cpu=1 pids=4
+  freeze NAME           cgroup.freeze = 1 (pausa real)
+  thaw NAME             cgroup.freeze = 0
+  kill NAME             cgroup.kill (fallback en kernels < 5.14)
+  events NAME [FILE]    stream de cgroup.events (o memory.events)
+  wait NAME             bloquea hasta populated = 0
+  stat NAME             métricas del grupo
+  remove NAME           borra el grupo (debe estar vacío)
+
+Variables de entorno:
+  GOBLIN_CGROUP   override del directorio base (útil para tests)
+  XDG_RUNTIME_DIR directorio de estado, por defecto /tmp
+EOF
+}
+
+# --- descubrimiento ---------------------------------------------------
+
+unescape_mount() {
+    # /proc/mounts escapa espacios y barras como \040 y \134
+    printf '%s\n' "$1" | sed 's/\\040/ /g; s/\\134/\\/g'
+}
+
+cgroup_mount() {
+    while read -r dev point type opts rest; do
+        [ "$type" = cgroup2 ] || continue
+        unescape_mount "$point"
+        return 0
+    done < /proc/mounts
+    die "no hay mount de cgroup2 en /proc/mounts"
+}
+
+# Imprime el primer ancestro (de abajo hacia arriba) que sea escribible y
+# no tenga procesos en su propio cgroup.procs. Esa es la condición que
+# permite crear hijos con controladores activos sin violar cgroup v2.
+discover() {
+    mp=$(cgroup_mount)
+    cg=$(awk -F: '$1 == 0 { print $3; exit }' /proc/self/cgroup)
+    [ -n "$cg" ] || die "no se pudo leer /proc/self/cgroup"
+    [ "$cg" = "/" ] && cg=''
+
+    p=$cg
+    while :; do
+        dir="$mp$p"
+        if [ -d "$dir" ] && [ -w "$dir" ] && [ -w "$dir/cgroup.procs" ]; then
+            # Los archivos de cgroupfs reportan size 0 en stat: hay que
+            # leer cgroup.procs para saber si hay procesos internos.
+            procs=$(cat "$dir/cgroup.procs" 2>/dev/null || true)
+            if [ -z "$p" ] || [ -z "$procs" ]; then
+                printf '%s\n' "$dir"
+                return 0
+            fi
+        fi
+        [ -n "$p" ] || break
+        case "$p" in
+            */*) p=${p%/*} ;;
+            *)   p='' ;;
+        esac
+    done
+    die "no hay subárbol cgroup2 escribible sin procesos internos"
+}
+
+base() {
+    if [ -n "${GOBLIN_CGROUP:-}" ]; then
+        printf '%s\n' "$GOBLIN_CGROUP"
+    else
+        printf '%s\n' "$(discover)/goblin"
+    fi
+}
+
+group_dir() {
+    printf '%s\n' "$(base)/$1"
+}
+
+check_name() {
+    case "$1" in
+        ''|/*|*//*|*/./*|*/../*|*/..|./*|../*|*..) die "nombre inválido: $1" ;;
+    esac
+}
+
+require_group() {
+    t=$(group_dir "$1")
+    [ -d "$t" ] || die "el grupo no existe: $1"
+    printf '%s\n' "$t"
+}
+
+# --- comandos ---------------------------------------------------------
+
+cmd_create() {
+    [ $# -ge 1 ] || die "create requiere NAME"
+    name=$1
+    check_name "$name"
+    b=$(base)
+    [ -d "$b" ] || mkdir -p "$b" || die "no se pudo crear la base: $b"
+    t="$b/$name"
+    mkdir "$t" || die "no se pudo crear el grupo: $t"
+
+    # subtree_control se escribe en el PADRE. Habilitamos los controladores
+    # que el kernel pone a disposición en este punto del hierarchy.
+    if [ -f "$b/cgroup.controllers" ]; then
+        for c in $(cat "$b/cgroup.controllers"); do
+            case "$c" in
+                cpu|memory|pids|io|cpuset)
+                    printf '+%s\n' "$c" >> "$b/cgroup.subtree_control" 2>/dev/null || true
+                    ;;
+            esac
+        done
+    fi
+    printf '%s\n' "$t"
+}
+
+cmd_list() {
+    b=$(base)
+    [ -d "$b" ] || return 0
+    for d in "$b"/*; do
+        [ -d "$d" ] || continue
+        printf '%s\n' "${d##*/}"
+    done
+}
+
+cmd_enter() {
+    [ $# -eq 2 ] || die "enter requiere NAME PID"
+    name=$1
+    pid=$2
+    check_name "$name"
+    t=$(require_group "$name")
+    printf '%s\n' "$pid" > "$t/cgroup.procs" || die "no se pudo mover el pid $pid"
+}
+
+parse_bytes() {
+    case "$1" in
+        *[Kk]) printf '%s\n' "$((${1%?} * 1024))" ;;
+        *[Mm]) printf '%s\n' "$((${1%?} * 1048576))" ;;
+        *[Gg]) printf '%s\n' "$((${1%?} * 1073741824))" ;;
+        *)     printf '%s\n' "$1" ;;
+    esac
+}
+
+cmd_limit() {
+    [ $# -ge 2 ] || die "limit requiere NAME y al menos un KEY=VAL"
+    name=$1
+    shift
+    check_name "$name"
+    t=$(require_group "$name")
+    for spec in "$@"; do
+        key=${spec%%=*}
+        val=${spec#*=}
+        [ "$key" != "$spec" ] || die "formato inválido: $spec"
+        case "$key" in
+            memory)
+                [ -f "$t/memory.max" ] || die "memory.max no disponible"
+                printf '%s\n' "$(parse_bytes "$val")" > "$t/memory.max" ||
+                    die "no se pudo escribir memory.max"
+                ;;
+            cpu)
+                [ -f "$t/cpu.max" ] || die "cpu.max no disponible"
+                case "$val" in
+                    ''|*[!0-9]*) die "cpu debe ser un entero: $val" ;;
+                esac
+                printf '%s 100000\n' "$((val * 100000))" > "$t/cpu.max" ||
+                    die "no se pudo escribir cpu.max"
+                ;;
+            pids)
+                [ -f "$t/pids.max" ] || die "pids.max no disponible"
+                printf '%s\n' "$val" > "$t/pids.max" ||
+                    die "no se pudo escribir pids.max"
+                ;;
+            *) die "límite desconocido: $key" ;;
+        esac
+    done
+}
+
+set_freeze() {
+    name=$1
+    val=$2
+    check_name "$name"
+    t=$(require_group "$name")
+    [ -f "$t/cgroup.freeze" ] || die "cgroup.freeze no disponible"
+    printf '%s\n' "$val" > "$t/cgroup.freeze" || die "no se pudo escribir cgroup.freeze"
+}
+
+cmd_kill() {
+    [ $# -eq 1 ] || die "kill requiere NAME"
+    name=$1
+    check_name "$name"
+    t=$(require_group "$name")
+    if [ -f "$t/cgroup.kill" ]; then
+        printf '1\n' > "$t/cgroup.kill" || die "cgroup.kill falló"
+        return 0
+    fi
+    # Kernel < 5.14: congelar, matar las procs conocidas, descongelar.
+    printf '1\n' > "$t/cgroup.freeze" 2>/dev/null || true
+    for pid in $(cat "$t/cgroup.procs" 2>/dev/null); do
+        kill -KILL "$pid" 2>/dev/null || true
+    done
+    printf '0\n' > "$t/cgroup.freeze" 2>/dev/null || true
+}
+
+cmd_events() {
+    [ $# -ge 1 ] || die "events requiere NAME"
+    name=$1
+    file=${2:-cgroup.events}
+    check_name "$name"
+    t=$(require_group "$name")
+    f="$t/$file"
+    [ -f "$f" ] || die "archivo de eventos no disponible: $file"
+    prev=''
+    while :; do
+        cur=$(cat "$f" 2>/dev/null || true)
+        if [ "$cur" != "$prev" ]; then
+            printf '%s\n' "$cur"
+            prev=$cur
+        fi
+        sleep 1
+    done
+}
+
+cmd_wait() {
+    [ $# -eq 1 ] || die "wait requiere NAME"
+    name=$1
+    check_name "$name"
+    t=$(require_group "$name")
+    f="$t/cgroup.events"
+    while [ "$(awk '/^populated / { print $2 }' "$f" 2>/dev/null)" = 1 ]; do
+        sleep 1
+    done
+    printf 'empty\n'
+}
+
+cmd_stat() {
+    [ $# -eq 1 ] || die "stat requiere NAME"
+    name=$1
+    check_name "$name"
+    t=$(require_group "$name")
+    for f in cgroup.events pids.current pids.max memory.current memory.peak memory.max cpu.stat; do
+        [ -f "$t/$f" ] || continue
+        printf '%s: ' "$f"
+        tr '\n' ' ' < "$t/$f"
+        printf '\n'
+    done
+}
+
+cmd_remove() {
+    [ $# -eq 1 ] || die "remove requiere NAME"
+    name=$1
+    check_name "$name"
+    t=$(require_group "$name")
+    rmdir "$t" || die "no se pudo borrar el grupo (¿está vacío?): $t"
+}
+
+# --- dispatch ---------------------------------------------------------
+
+[ $# -ge 1 ] || { usage >&2; exit 2; }
+cmd=$1
+shift
+case "$cmd" in
+    discover) discover ;;
+    create)   cmd_create "$@" ;;
+    list)     cmd_list "$@" ;;
+    enter)    cmd_enter "$@" ;;
+    limit)    cmd_limit "$@" ;;
+    freeze)   set_freeze "$1" 1 ;;
+    thaw)     set_freeze "$1" 0 ;;
+    kill)     cmd_kill "$@" ;;
+    events)   cmd_events "$@" ;;
+    wait)     cmd_wait "$@" ;;
+    stat)     cmd_stat "$@" ;;
+    remove)   cmd_remove "$@" ;;
+    -h|--help|help) usage ;;
+    *) die "comando desconocido: $cmd" ;;
+esac

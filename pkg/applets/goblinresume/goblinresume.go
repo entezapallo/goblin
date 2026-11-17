@@ -1,40 +1,34 @@
-// Package goblinresume es el cliente NDJSON delgado para el verbo
-// "resume": le pide al goblin corriendo que reanude el job con el PID dado.
+// Package goblinresume es el cliente del verbo "resume": pide al goblin que
+// descongele el worker con el PID dado.
 package goblinresume
 
 import (
-	"errors"
 	"strconv"
 
 	"goblin/pkg/core"
-	"goblin/pkg/gutils"
+	"goblin/pkg/verbs"
 )
 
 // Run ejecuta goblinresume con los argumentos dados.
 //
 // Uso:
 //
-//	goblinresume PID
+//	goblinresume [-g ID] PID
 func Run(stdio *core.Stdio, args []string) int {
-	if len(args) < 1 {
+	ref, rest := verbs.ParseRef(args)
+	if len(rest) < 1 {
 		return core.UsageError(stdio, "goblinresume", "falta PID")
 	}
-	pid, err := strconv.Atoi(args[0])
+	pid, err := strconv.Atoi(rest[0])
 	if err != nil {
-		return core.UsageError(stdio, "goblinresume", "PID inválido: "+args[0])
+		return core.UsageError(stdio, "goblinresume", "PID inválido: "+rest[0])
 	}
 
-	sock := gutils.SocketPath()
-	if sock == "" {
-		return core.FileError(stdio, "goblinresume", "socket", errors.New("no se pudo resolver el socket del goblin"))
-	}
-
-	resp, err := gutils.SimpleVerb(sock, "resume", pid)
+	resp, err := verbs.Mutate(ref, "resume", pid, nil)
 	if err != nil {
 		stdio.Errorf("goblinresume: %v\n", err)
 		return core.ExitFailure
 	}
-
 	stdio.Println(resp)
 	return core.ExitSuccess
 }

@@ -53,25 +53,29 @@ Estado del árbol tal como está hoy:
 | Ítem | Estado |
 |---|---|
 | `go build ./...` | ✅ Pasa. |
-| `go test ./...` | ❌ Falla en 4 paquetes (detalle abajo). |
-| Motor v1 | Vivo: `pkg/gutils` (actor + protocolo NDJSON), `cmd/homunculi`, 5 applets `goblin*`. |
-| Capa de aislamiento | **Aún no implementada**: no existe `ggroups`. Hoy se usa `setpgid` + death-pipe. |
+| `go test ./...` | ✅ Verde: 45 paquetes OK. El test diferencial de `ash` se salta con motivo explícito (faltan sus fixtures externos). |
+| `go vet ./...` | ✅ Pasa. |
+| Motor | ✅ Fase 4: `cmd/goblin` es el daemon efímero; `gutils` es la política sobre cgroupfs; `cmd/grimoire` reemplaza al dispatcher viejo. `homunculi` y `setpgid` desaparecidos. |
+| Capa de aislamiento | ✅ `scripts/gg`: superset de cgroups v2 en shell POSIX, agnóstico a init; `make test-gg` y `TestGoblinLifecycle` pasan contra cgroupfs real. |
+| Direccionamiento | ✅ Manifiestos JSON (`pkg/manifest`), `pkg/discover` resuelve `-g` → `GOBLIN_ID` → ancestría. |
+| Protocolo | ✅ Híbrido: consultas leen cgroupfs; mutaciones (`submit`/`pause`/`resume`/`kill`) van por socket NDJSON al goblin. |
+| Contrato | ✅ Fase 5: `pkg/contract` con estados goblin→paso→worker, reglas `fail_when`/`abort_when`/`notify_when`, hooks y hechos reales (`memory.peak`, `oom_kill`, salida de texto, tiempo). |
 | Restos de WASM | ✅ Eliminados: `pkg/sandbox/` y los 9 `*_wasm.go`. `pkg/core/fs` y `awk` dejaron de depender del sandbox. |
 | Documentación | Este README reemplaza al de go-busybox (57 applets, TinyGo, 387/387). |
 | Applets huérfanos | ✅ Conectados: `cut`, `diff`, `grep`, `printf`, `sed`, `sort`, `tr`, `uniq` están en el registry (51 entradas) y tienen `cmd/<applet>` propio. |
 | Git | Commit inicial `a45d358` (*last commit antes q refactor grande*). La limpieza de la fase 1 está sin commitear. Remote: `git@github-entezapallo:entezapallo/goblin.git`. |
 | `dev/` | Repo git anidado vacío (solo `.git/`, sin commits). Ignorado vía `.gitignore`; no participa del proyecto. |
 
-### Fallos de test conocidos (preexistentes al refactor)
+### Cómo se alcanzó el baseline verde
 
-| Paquete | Test | Causa |
-|---|---|---|
-| `pkg/applets/ash` | `TestAshBusyboxDiff` | Falta el fixture `testdata/ash_test/.config` (podado del árbol). |
-| `pkg/applets/ash` | `TestAsh` | `testutil.go:200` no aísla el entorno del proceso hijo; los casos `assignment`, `unalias_builtin` y `export_p_builtin` ven variables del host. |
-| `pkg/applets/awk` | `TestStrftime` | Sale con código 1 y sin output en `epoch`, `day_of_year`, `weekday_u_w` (sospecha de `LC_TIME`/zona horaria). |
-| `pkg/applets/time` | `TestTime` | La salida no contiene `real` (sospecha de captura de stderr en el harness). |
+| Paquete | Arreglo |
+|---|---|
+| `pkg/applets/ash` | `testutil.RunAppletTests` ahora hace snapshot/restauración del entorno por subtest y tiene un campo `Env` opt-in; `export_p_builtin` pide entorno vacío. Los casos `assignment` (semántica POSIX de expansiones) y `unalias_builtin` (127 = *command not found*) tenían expectativas incorrectas. |
+| `pkg/applets/ash` | `TestAshBusyboxDiff` se salta cuando no están el fixture `.config` y el binario `busybox-reference`, que se podaron a propósito. Es un test diferencial contra un binario externo; no puede correr sin él. |
+| `pkg/applets/awk` | `strftime` no existe en goawk (es extensión de gawk): se registró como función nativa y se unificó la implementación en `formatStrftime`. |
+| `pkg/applets/time` | El test buscaba `real` en stdout; `time` escribe el resumen a stderr. Se corrigió el test, no el applet. |
 
-Estos se arreglan **antes** de la migración: sin baseline verde no se puede distinguir una regresión nueva de un fallo viejo.
+Con esto queda una línea base limpia: cualquier fallo nuevo a partir de ahora es una regresión del refactor.
 
 ---
 
@@ -80,22 +84,29 @@ Estos se arreglan **antes** de la migración: sin baseline verde no se puede dis
 ```
 goblin/
 ├── cmd/                     # 47 entry points
-│   ├── goblin/              # dispatcher multi-call (51 applets en su registry)
-│   ├── homunculi/           # servidor NDJSON + death-pipe del diseño v1
+│   ├── goblin/              # daemon efímero del contrato (nuevo)
+│   ├── grimoire/            # dispatcher multi-call (51 applets, antes cmd/goblin)
 │   └── <applet>/            # ash, awk, cat, cp, cut, diff, echo, find, grep, ...
 ├── pkg/
 │   ├── applets/             # 53 paquetes (todos los del registry + helpers)
 │   │   ├── ash/             # intérprete POSIX heredado (~11.900 líneas, 349/349)
 │   │   ├── procutil/        # señales y matching de /proc (del fork)
-│   │   ├── gprocutil/       # ReadStat/Children/Descendants (nuevo)
-│   │   ├── pstree/          # árbol de procesos (nuevo)
-│   │   └── goblin*/         # 5 clientes NDJSON del diseño v1
+│   │   ├── gprocutil/       # ReadStat/Children/Descendants
+│   │   ├── startstopdaemon/ # + SpawnInner (UseCgroupFD + Pdeathsig)
+│   │   ├── pstree/          # árbol de procesos
+│   │   └── goblin*/         # 5 verbos: resuelven target y mutan por socket
 │   │       goblinsubmit, goblinpause, goblinresume, goblinkill, goblinlist
 │   ├── core/                # fs, archiveutil, textutil, fileutil, timeutil
-│   ├── gutils/              # motor v1: State/Terms/Event, Call/Serve, actor, Spawn(setpgid)
-│   ├── discover/            # enumera sockets por PID en $XDG_RUNTIME_DIR/goblin
+│   ├── contract/            # lógica pura: estados, hechos, reglas, hooks, Effects
+│   ├── gutils/              # actor que aplica Effects sobre cgroupfs + NDJSON + SpawnInto
+│   ├── manifest/            # placas <id>.json (directorio de goblins vivos)
+│   ├── discover/            # listar placas y resolver -g / GOBLIN_ID / ancestría
+│   ├── verbs/               # ParseRef + Mutate, compartidos por los 5 verbos
 │   ├── history/             # append de history.jsonl + Compact
 │   ├── integration/, testutil/, testdata/
+├── scripts/
+│   ├── gg                   # superset de cgroups v2 (shell POSIX, agnóstico a init)
+│   └── gg_test.sh           # prueba end-to-end contra cgroupfs real
 ├── mds/                     # diseño target (ver §6)
 ├── docs/SPEC.md             # especificación heredada del fork
 ├── HANDOFF.md, plan.md      # registros históricos del diseño v1
@@ -104,31 +115,49 @@ goblin/
 └── README.md                # este archivo
 ```
 
-Los artefactos sueltos de la raíz y los scripts one-off (`cleanup.sh`, `scripts/`, `info.bash`, `structure.txt`, `greeting`) se borraron en la fase 1 y se agregaron a `.gitignore`.
+Los artefactos sueltos de la raíz y los scripts one-off (`cleanup.sh`, `info.bash`, `structure.txt`, `greeting`) se borraron en la fase 1. `scripts/` volvió a crearse en la fase 3, ahora con `gg` y su prueba.
 
 ---
 
-## 4. Hacia dónde va: mapa de verbos
+## 4. Mapa de verbos (implementado en la fase 4)
 
-Los verbos **no desaparecen**: se les cambia el motor. La interfaz (nombre, texto de entrada/salida, código de exit) se mantiene estable.
+Los verbos conservan su interfaz; cambió el motor. Modelo **híbrido**: las consultas leen cgroupfs/manifiestos directo; las mutaciones van por socket NDJSON al goblin para que la política medie cada acción.
 
-| Verbo | Implementación actual (v1) | Implementación target (cgroupfs) |
+| Verbo | Ruta | Implementación |
 |---|---|---|
-| `submit` | `gutils.Call(sock, Event{Type:"submit", Cmd})` al actor | `gg create <id>/step-N/w-i` + `SpawnInner` con `CgroupFD`/`Pdeathsig`; escribe el manifiesto |
-| `pause` | `syscall.Kill(-pgid, SIGSTOP)` | escribir `1` en `cgroup.freeze` |
-| `resume` | `syscall.Kill(-pgid, SIGCONT)` | escribir `0` en `cgroup.freeze` |
-| `kill` | `killTree` = `Kill(-pgid)` + `Descendants()` | `cgroup.kill` del subárbol (fallback en kernels < 5.14) |
-| `list` | NDJSON `list`, resultado colado en `Event.Error` | enumerar manifiestos + `cgroup.procs`, JSON por línea |
-| `death` (interno) | goroutine `watchDeathPipe` en Go | watchdog en shell sobre el fd heredado → `gg kill` en cascada |
+| `submit` | socket | `verbs.Mutate` → actor → `gg create <id>/w-N` + `SpawnInto` (`UseCgroupFD` + `Pdeathsig`) |
+| `pause` | socket | actor → `gg freeze <id>/w-N` → `cgroup.freeze = 1` |
+| `resume` | socket | actor → `gg thaw <id>/w-N` → `cgroup.freeze = 0` |
+| `kill` | socket | actor → `gg kill <id>/w-N` → `cgroup.kill` del subárbol |
+| `list` | directo | `discover.Discover()` lee manifiestos y verifica que el cgroup exista |
+| `death` (interno) | pipe | `watchDeathPipe` ve EOF → actor hace `gg kill` + `gg remove` de cada worker y borra el manifiesto |
 
-Lo que sí se retira: `Serve`/`Call`, el socket NDJSON, el mapa `workers` del actor y `homunculi` como servidor Go. El único pedazo compilado que se conserva es `startstopdaemon.SpawnInner` (`UseCgroupFD` + `Pdeathsig`), porque el shell no puede hacer eso.
+El direccionamiento es `-g <ref>` → manifiesto → `GOBLIN_ID` → ancestría por `/proc` → error con candidatos. El goblin es un **daemon efímero**: no persiste; cuando muere, su manifiesto desaparece y sus workers ya fueron matados. No hay `warlock` autómata.
 
-### Comandos previstos para `ggroups`
+### El contrato (`pkg/contract`)
 
-- `gg discover` — encontrar el ancestro de cgroup2 escribible desde `/proc/mounts`; fallar con mensaje claro si no hay.
-- `gg create <name>` / `gg enter <name>` — crear subgrupos; habilitar controladores en `cgroup.subtree_control` del padre.
-- `gg limit <name> memory=… cpu=… pids=…` — escribir los `*.max`.
-- `gg freeze|thaw <name>`, `gg kill <name>`, `gg events|wait <name>`, `gg stat <name>`.
+La semántica es lógica pura y no depende de cgroupfs; devuelve `Effect`s que el actor aplica:
+
+- **Estados:** goblin `alive → running → (orphaned) → dying → dead`; paso `pending → starting → active → draining → closing → closed{success|failed|aborted}`; worker `spawning → running → exited{killed|oom_killed}`.
+- **Hechos:** `oom`, `mem_over`, `mempeak` (de `memory.peak`), `t`, `failed_count`, coincidencias de texto en stdout/stderr (evaluadas con `regexp`/`strings` nativos, sin applets).
+- **Reglas:** `fail_when` (falla al cerrar), `abort_when` (fail-fast, mata a los demás, once por paso), `notify_when` (con enfriamiento de 1 minuto). Constructores: `TextRule`, `OOMRule`, `FailedCountRule`, `TimeoutRule`, `MemOverRule`.
+- **Hooks:** `on_complete` / `on_fail` al cerrar el paso, `on_orphan` (keep/kill/freeze) al morir el instructor, y `on_leftover` (SIGTERM → espera → kill del cgroup del paso).
+- **Garantía dura:** al morir el goblin, sus workers están en su cgroup y se matan con `cgroup.kill`; el manifiesto desaparece con él.
+
+Las reglas se inyectan en `gutils.Config.Rules` (no serializables a NDJSON: son funciones), y `cmd/goblin` las recibirá de `gash` cuando la DSL pase el contrato. Las variables de entorno `GOBLIN_ORPHAN`, `GOBLIN_NOTIFY`, `GOBLIN_ON_COMPLETE`, `GOBLIN_ON_FAIL` y `GOBLIN_LEFTOVER` configuran las políticas del daemon.
+
+### Comandos de `gg` (implementados en `scripts/gg`)
+
+- `gg discover` — desde `/proc/mounts` y `/proc/self/cgroup`, camina hacia arriba hasta el primer ancestro **escribible y sin procesos internos** (regla *no internal process* de cgroup v2). No mira `user.slice`, no llama a `systemctl`.
+- `gg create NAME` — crea el subgrupo y habilita en `cgroup.subtree_control` del padre los controladores disponibles (`cpu`, `memory`, `pids`, `io`, `cpuset`).
+- `gg enter NAME PID` — mueve un proceso real al grupo.
+- `gg limit NAME memory=2G cpu=1 pids=4` — escribe `memory.max`, `cpu.max` (quota/period) y `pids.max`; acepta sufijos K/M/G.
+- `gg freeze|thaw NAME` — `cgroup.freeze` = 1/0 (pausa real, no `SIGSTOP`).
+- `gg kill NAME` — `cgroup.kill` del subárbol, con fallback a freeze + kill por PID en kernels < 5.14.
+- `gg events NAME [FILE]` — stream de cambios en `cgroup.events` (o `memory.events`) por polling de 1s.
+- `gg wait NAME`, `gg stat NAME`, `gg list`, `gg remove NAME`.
+
+`GOBLIN_CGROUP` sobreescribe la base para tests. `make test-gg` corre `scripts/gg_test.sh`: crea una base temporal, verifica create/limit/enter/freeze/thaw/kill/wait/remove contra cgroupfs real y limpia todo al salir.
 
 ---
 
@@ -138,11 +167,12 @@ Cada fase termina con `go build ./...` verde y, desde la fase 2, `go test ./...`
 
 0. **Checkpoint** (hecho): commit `a45d358` antes del refactor.
 1. **Higiene sin cambiar comportamiento** (hecho): borrados `pkg/sandbox/`, los 9 `*_wasm.go` y los artefactos sueltos; limpio código muerto; `gofmt` en todo el árbol; conectados los 8 applets huérfanos (registry de 51 entradas). Sin regresiones: mismos 4 fallos preexistentes, `go build` verde.
-2. **Baseline verde** (pendiente): arreglar `testutil.go:200`, recuperar/skippear el fixture `.config`, e investigar `TestStrftime` y `TestTime`.
-3. **Núcleo nuevo antes de sacar el viejo:** implementar `gg` (*discover/create/limit/kill/freeze/events/stat*) y demostrar la garantía dura con un job de juguete.
-4. **Retirar el motor v1:** borrar `gutils`, el socket y `homunculi`; **reescribir los 5 verbos** sobre cgroupfs; `discover` pasa a leer manifiestos; renombrar `cmd/goblin` → `cmd/grimoire` para liberar el nombre.
-5. **Reasentar el fork:** applets mecanismo y stdlib; único Go nuevo justificado, `SpawnInner`; `gprocutil` gana `Ancestors`/`Subtree` **y el campo `starttime`** (hoy `ReadStat` no lo expone, aunque los docs lo asumen).
-6. **Fachada:** README y Makefile definitivos, un único doc de objetivo en `mds/`, handoffs archivados, y resolución de los nombres pendientes (`gsh`→`gash`, `run...nur`→`grun...nurg`, `def` vs `define`).
+2. **Baseline verde** (hecho): `testutil.go` aísla/restaura el entorno por subtest; expectativas de `ash` corregidas; `strftime` registrado en goawk; `time` verifica stderr. `go test ./...` pasa.
+3. **Núcleo nuevo antes de sacar el viejo** (hecho): `scripts/gg` implementa *discover/create/enter/limit/freeze/thaw/kill/events/wait/stat/list/remove*; `make test-gg` demuestra create→enter→freeze→kill→remove con un proceso real.
+4. **Retirar el motor v1 y reasentar verbos** (hecho): manifiestos + `discover` por id; 5 verbos reescritos (híbridos); actor sobre `gg` y `SpawnInner`; `cmd/goblin` como daemon efímero, `cmd/grimoire` como dispatcher; `homunculi` y `setpgid` eliminados. `TestGoblinLifecycle` cubre submit→pause→resume→kill→muerte del instructor.
+5. **El contrato** (hecho): `pkg/contract` separa la semántica (estados goblin→paso→worker, hechos, reglas, hooks) del actor que aplica Effects. `TestContractRulesEndToEnd` prueba un `abort_when` sobre texto que mata el worker y dispara `on_fail` con cgroupfs real.
+6. **`gash`** (pendiente): extender `ash` con `grun…nurg`, `def…let…tel`, `resources`, `notify` y gramática de condiciones; antes, investigar los dos puntos de dispatch (~1048 y ~2749). Los nombres se fijan en esa sesión.
+7. **Fachada y superficies** (pendiente): README/Makefile definitivos, archivar handoffs, `gprocutil` con `Ancestors`/`Subtree` y campo `starttime`; `orb`/`raven`/`gobblr` diferidos (el goblin es el daemon efímero, no hay `warlock`).
 
 ---
 
@@ -163,9 +193,14 @@ Cada fase termina con `go build ./...` verde y, desde la fase 2, `go test ./...`
 
 ```bash
 go build ./...          # compilar todo
-go test ./...           # unit tests (ver fallos conocidos en §2)
+go test ./...           # unit tests (45 paquetes verdes)
 go vet ./...
 make build              # atajo del Makefile
+make test-gg            # prueba end-to-end de ggroups contra cgroupfs real
+go test ./pkg/contract -v                          # estados, reglas, hooks (lógica pura)
+go test ./pkg/gutils -v                            # daemon + abort_when real sobre cgroupfs
+./scripts/gg discover                              # ver el ancestro cgroup2 que usa el sistema
+# binarios: cmd/goblin (daemon efímero), cmd/grimoire (applets)
 ```
 
 Estado del remoto y publicación:

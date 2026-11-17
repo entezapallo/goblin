@@ -1,150 +1,69 @@
 // cmd/goblin/main.go
 //
-// Dispatcher multi-call. Reemplaza a cmd/busybox, que se borró junto con
-// la poda (ver HANDOFF.md). Expone los applets que sobrevivieron el recorte,
-// más pstree y los cinco verbos de contrato (goblinsubmit/pause/resume/kill/list).
-// En la migración a cgroups este dispatcher pasará a llamarse cmd/grimoire.
+// goblin es el daemon efímero del contrato: nace con el script instructor,
+// gestiona el ciclo de vida de sus workers y muere con él (o al aplicar
+// on_orphan), sin persistir. No es un applet: no pasa por cmd/grimoire.
+//
+// Uso (lo invoca el instructor, no a mano):
+//
+//	goblin ID SOCKET CGROUP DEATH_FD OWNER_PID [GG_PATH]
+//
+// DEATH_FD es el extremo de lectura de un pipe: cuando el instructor muere,
+// el kernel cierra el extremo de escritura y el goblin ve EOF, dispara la
+// cascada gg kill y se va. GG_PATH permite apuntar a scripts/gg en tests.
 package main
 
 import (
 	"fmt"
-	"goblin/pkg/applets/ash"
-	"goblin/pkg/applets/awk"
-	"goblin/pkg/applets/cat"
-	"goblin/pkg/applets/cp"
-	"goblin/pkg/applets/cut"
-	"goblin/pkg/applets/diff"
-	"goblin/pkg/applets/echo"
-	"goblin/pkg/applets/find"
-	"goblin/pkg/applets/free"
-	"goblin/pkg/applets/goblinkill"
-	"goblin/pkg/applets/goblinlist"
-	"goblin/pkg/applets/goblinpause"
-	"goblin/pkg/applets/goblinresume"
-	"goblin/pkg/applets/goblinsubmit"
-	"goblin/pkg/applets/grep"
-	"goblin/pkg/applets/gunzip"
-	"goblin/pkg/applets/gzip"
-	"goblin/pkg/applets/head"
-	"goblin/pkg/applets/kill"
-	"goblin/pkg/applets/killall"
-	"goblin/pkg/applets/ls"
-	"goblin/pkg/applets/mkdir"
-	"goblin/pkg/applets/mv"
-	"goblin/pkg/applets/nice"
-	"goblin/pkg/applets/nohup"
-	"goblin/pkg/applets/nproc"
-	"goblin/pkg/applets/pgrep"
-	"goblin/pkg/applets/pidof"
-	"goblin/pkg/applets/pkill"
-	"goblin/pkg/applets/printf"
-	"goblin/pkg/applets/ps"
-	"goblin/pkg/applets/pstree"
-	"goblin/pkg/applets/pwd"
-	"goblin/pkg/applets/renice"
-	"goblin/pkg/applets/rm"
-	"goblin/pkg/applets/rmdir"
-	"goblin/pkg/applets/sed"
-	"goblin/pkg/applets/setsid"
-	"goblin/pkg/applets/sleep"
-	"goblin/pkg/applets/sort"
-	"goblin/pkg/applets/startstopdaemon"
-	"goblin/pkg/applets/tail"
-	"goblin/pkg/applets/tar"
-	"goblin/pkg/applets/taskset"
-	apptime "goblin/pkg/applets/time" // alias: choca con el paquete stdlib "time"
-	"goblin/pkg/applets/timeout"
-	"goblin/pkg/applets/tr"
-	"goblin/pkg/applets/uniq"
-	"goblin/pkg/applets/uptime"
-	"goblin/pkg/applets/wc"
-	"goblin/pkg/applets/xargs"
-	"goblin/pkg/core"
 	"os"
-	"path/filepath"
+	"strconv"
+
+	"goblin/pkg/gutils"
 )
 
-type runFunc func(stdio *core.Stdio, args []string) int
-
-// registry: applets despachables del árbol podado — los 37 que sobrevivieron
-// el recorte, pstree, los cinco verbos de contrato y los 8 applets de texto
-// que existían en pkg/applets pero no se despachaban (cut, diff, grep,
-// printf, sed, sort, tr, uniq).
-// Fuera a propósito (eliminados del árbol, ver HANDOFF.md):
-// dig, nc, ss, wget, logname, users, w, who, whoami, watch, ionice, top.
-var registry = map[string]runFunc{
-	"ash":             ash.Run,
-	"awk":             awk.Run,
-	"cat":             cat.Run,
-	"cp":              cp.Run,
-	"echo":            echo.Run,
-	"find":            find.Run,
-	"free":            free.Run,
-	"gunzip":          gunzip.Run,
-	"gzip":            gzip.Run,
-	"head":            head.Run,
-	"kill":            kill.Run,
-	"killall":         killall.Run,
-	"ls":              ls.Run,
-	"mkdir":           mkdir.Run,
-	"mv":              mv.Run,
-	"nice":            nice.Run,
-	"nohup":           nohup.Run,
-	"nproc":           nproc.Run,
-	"pgrep":           pgrep.Run,
-	"pidof":           pidof.Run,
-	"pkill":           pkill.Run,
-	"ps":              ps.Run,
-	"pwd":             pwd.Run,
-	"renice":          renice.Run,
-	"rm":              rm.Run,
-	"rmdir":           rmdir.Run,
-	"setsid":          setsid.Run,
-	"sleep":           sleep.Run,
-	"startstopdaemon": startstopdaemon.Run,
-	"tail":            tail.Run,
-	"tar":             tar.Run,
-	"taskset":         taskset.Run,
-	"time":            apptime.Run,
-	"timeout":         timeout.Run,
-	"uptime":          uptime.Run,
-	"wc":              wc.Run,
-	"xargs":           xargs.Run,
-	"cut":             cut.Run,
-	"diff":            diff.Run,
-	"grep":            grep.Run,
-	"printf":          printf.Run,
-	"sed":             sed.Run,
-	"sort":            sort.Run,
-	"tr":              tr.Run,
-	"uniq":            uniq.Run,
-	"pstree":          pstree.Run,
-	"goblinsubmit":    goblinsubmit.Run,
-	"goblinpause":     goblinpause.Run,
-	"goblinresume":    goblinresume.Run,
-	"goblinkill":      goblinkill.Run,
-	"goblinlist":      goblinlist.Run,
-}
-
 func main() {
-	stdio := core.DefaultStdio()
-
-	// Caso 1: invocado por symlink (argv[0] == nombre del applet)
-	name := filepath.Base(os.Args[0])
-	if run, ok := registry[name]; ok {
-		os.Exit(run(stdio, os.Args[1:]))
-	}
-
-	// Caso 2: invocado como "goblin <applet> [args...]"
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "uso: goblin <applet> [args...]")
+	if len(os.Args) < 6 {
+		fmt.Fprintln(os.Stderr, "uso: goblin ID SOCKET CGROUP DEATH_FD OWNER_PID [GG_PATH]")
 		os.Exit(2)
 	}
-	name = os.Args[1]
-	run, ok := registry[name]
-	if !ok {
-		fmt.Fprintf(os.Stderr, "goblin: applet desconocido: %s\n", name)
+
+	id := os.Args[1]
+	socketPath := os.Args[2]
+	cgroupPath := os.Args[3]
+	deathFD, err := strconv.Atoi(os.Args[4])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "goblin: DEATH_FD inválido: %v\n", err)
 		os.Exit(2)
 	}
-	os.Exit(run(stdio, os.Args[2:]))
+	ownerPID, err := strconv.Atoi(os.Args[5])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "goblin: OWNER_PID inválido: %v\n", err)
+		os.Exit(2)
+	}
+	ggPath := ""
+	if len(os.Args) > 6 {
+		ggPath = os.Args[6]
+	}
+
+	cfg := gutils.Config{
+		ID:           id,
+		SocketPath:   socketPath,
+		CGroupPath:   cgroupPath,
+		DeathPipeFD:  deathFD,
+		OwnerPID:     ownerPID,
+		GGPath:       ggPath,
+		OrphanPolicy: os.Getenv("GOBLIN_ORPHAN"), // keep | kill | freeze
+		NotifyHook:   os.Getenv("GOBLIN_NOTIFY"), // sh -c para notify_when
+		OnComplete:   os.Getenv("GOBLIN_ON_COMPLETE"),
+		OnFail:       os.Getenv("GOBLIN_ON_FAIL"),
+	}
+	if v := os.Getenv("GOBLIN_LEFTOVER"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.LeftoverSeconds = n
+		}
+	}
+	if err := gutils.Run(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "goblin: %v\n", err)
+		os.Exit(1)
+	}
 }

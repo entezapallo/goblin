@@ -31,6 +31,10 @@ sizes: ## Compila cada cmd/<applet> restante y muestra el tamaño de cada binari
 	echo "----------------------------------------"; \
 	printf 'TOTAL%16s %10d bytes (%s MB)\n' "" "$$total" "$$(echo "scale=2; $$total/1048576" | bc)"
 
+.PHONY: test-gg
+test-gg: ## prueba end-to-end de ggroups contra cgroupfs real
+	@./scripts/gg_test.sh
+
 .PHONY: clean
 clean:
 	@rm -f /tmp/build-errors.log /tmp/sizes-err-*.log

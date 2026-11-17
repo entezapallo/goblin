@@ -1,9 +1,8 @@
 // Package gutils es el core de política de goblin: qué significa cada
 // evento/señal en términos de contrato de ciclo de vida. No es applet
-// (no tiene Run(stdio,args), no se registra en cmd/goblin). Es la
-// librería que los applets de verbo (goblinsubmit, goblinpause, etc.)
-// consumen como cliente vía Call/SimpleVerb, y que el goblin mismo usa
-// del lado servidor vía Serve.
+// (no tiene Run(stdio,args), no se registra en cmd/grimoire). Es la
+// librería que los applets de verbo consumen como cliente vía Call/SimpleVerb,
+// y que el goblin mismo usa del lado servidor vía Serve.
 package gutils
 
 import (
@@ -12,6 +11,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+
+	"goblin/pkg/contract"
 )
 
 // State representa el estado del ciclo de vida de un goblin.
@@ -26,47 +27,53 @@ const (
 	StateKilled  State = "killed"
 )
 
-// Terms son los términos de recurso/contrato bajo los que corre un goblin
-// (lo que en el HANDOFF se menciona junto a resources/memory/cpu/workers).
-// GPU queda fuera a propósito — es tema aparte, no entra en el core todavía.
+// Terms son los términos de recurso/contrato bajo los que corre un goblin.
 type Terms struct {
-	MemoryMB   int
-	CPUCores   float64
-	Workers    int
-	MaxWPerCPU int
+	MemoryMB   int     `json:"memory_mb,omitempty"`
+	CPUCores   float64 `json:"cpu_cores,omitempty"`
+	Workers    int     `json:"workers,omitempty"`
+	MaxWPerCPU int     `json:"max_w_per_cpu,omitempty"`
 }
 
-// Event es un mensaje del protocolo NDJSON entre Call/SimpleVerb (cliente)
-// y Serve (servidor). Una línea de texto = un Event completo, tanto para
-// requests como para responses. Framing simple: una conexión por llamada,
-// se escribe una línea, se lee una línea, se cierra. Sin ID de correlación
-// todavía — se puede agregar después sin romper el protocolo.
+// Event es un mensaje del protocolo NDJSON. Consultas (list/stat) NO usan
+// este canal: leen cgroupfs directo. Solo las mutaciones pasan por acá.
 type Event struct {
-	Type  string   `json:"type"` // "submit", "pause", "resume", "kill", "status", "list", "done", "fail"
-	PID   int      `json:"pid,omitempty"`
-	Cmd   []string `json:"cmd,omitempty"` // solo para "submit": comando a lanzar
-	State State    `json:"state,omitempty"`
-	Error string   `json:"error,omitempty"`
+	Type     string            `json:"type"` // "submit", "pause", "resume", "kill", "list", "death", "error", "ok"
+	PID      int               `json:"pid,omitempty"`
+	Cmd      []string          `json:"cmd,omitempty"`
+	Step     string            `json:"step,omitempty"`
+	Terms    Terms             `json:"terms,omitempty"`
+	Labels   map[string]string `json:"labels,omitempty"`
+	State    State             `json:"state,omitempty"`
+	Error    string            `json:"error,omitempty"`
+	ExitCode int               `json:"exit_code,omitempty"`
+	OOM      bool              `json:"oom,omitempty"`
 }
 
-// SocketPath resuelve el path del unix socket del goblin actual.
-// Si GOBLIN_SOCKET está seteada, se usa tal cual (override manual, útil
-// para debugging/pruebas). Si no, fallback simple basado en PPID, como
-// marca el HANDOFF: pkg/discover lo va a reemplazar más adelante por
-// descubrimiento real multi-goblin en $XDG_RUNTIME_DIR/goblin/.
-func SocketPath() string {
-	if override := os.Getenv("GOBLIN_SOCKET"); override != "" {
-		return override
-	}
+// Config describe el goblin efímero que se va a levantar.
+type Config struct {
+	ID              string
+	SocketPath      string
+	CGroupPath      string
+	DeathPipeFD     int
+	OwnerPID        int
+	GGPath          string          // binario gg; por defecto "gg"
+	OrphanPolicy    string          // keep | kill | freeze; default keep
+	NotifyHook      string          // comando sh -c para notify_when
+	LeftoverSeconds int             // term antes de matar lo que quedó en el paso
+	Rules           []contract.Rule // reglas aplicadas a cada paso
+	OnComplete      string          // hook sh -c al cerrar un paso con éxito
+	OnFail          string          // hook sh -c al cerrar un paso fallido
+}
 
-	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
-	if runtimeDir == "" {
-		runtimeDir = os.TempDir()
-	}
-	return fmt.Sprintf("%s/goblin/%d.sock", runtimeDir, os.Getppid())
-} // Call envía un Event al goblin en socketPath y espera la respuesta.
-// Una conexión por llamada: conecta, escribe una línea JSON, lee una
-// línea JSON de vuelta, cierra.
+// SocketPath devuelve la ruta del socket del goblin que invoca, si se
+// sobreescribe a mano. Ya no es el mecanismo de direccionamiento (usa
+// pkg/manifest), pero se conserva para debugging.
+func SocketPath() string {
+	return os.Getenv("GOBLIN_SOCKET")
+}
+
+// Call envía un Event al socket path y espera la respuesta.
 func Call(socketPath string, req Event) (Event, error) {
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
@@ -74,8 +81,7 @@ func Call(socketPath string, req Event) (Event, error) {
 	}
 	defer conn.Close()
 
-	enc := json.NewEncoder(conn)
-	if err := enc.Encode(req); err != nil {
+	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return Event{}, err
 	}
 
@@ -94,25 +100,20 @@ func Call(socketPath string, req Event) (Event, error) {
 	return resp, nil
 }
 
-// SimpleVerb es un atajo de Call para verbos sin payload extra
-// (pause/resume/kill/list), usado por los applets de verbo.
+// SimpleVerb es un atajo de Call para verbos sin payload extra.
 func SimpleVerb(socketPath string, verb string, pid int) (Event, error) {
 	return Call(socketPath, Event{Type: verb, PID: pid})
 }
 
 // Handler procesa un Event recibido por Serve y devuelve la respuesta.
-// El goblin real lo implementa con la lógica de estados/cascada; esto
-// es solo la firma del contrato entre Serve y esa lógica.
 type Handler func(req Event) Event
 
-// Serve escucha en socketPath y despacha cada Event recibido a handle,
-// una conexión a la vez, hasta que la conexión se cierra o falla.
-// No maneja Spawn/fork-exec — eso es responsabilidad de handle.
+// Serve escucha en socketPath y despacha cada Event a handle.
 func Serve(socketPath string, handle Handler) error {
 	if err := os.MkdirAll(dirOf(socketPath), 0700); err != nil {
 		return err
 	}
-	os.Remove(socketPath) // por si quedó un socket viejo de una corrida anterior
+	_ = os.Remove(socketPath) // socket viejo de una corrida anterior
 
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -139,13 +140,11 @@ func serveConn(conn net.Conn, handle Handler) {
 
 	var req Event
 	if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
-		resp := Event{Type: "error", Error: err.Error()}
-		json.NewEncoder(conn).Encode(resp)
+		_ = json.NewEncoder(conn).Encode(Event{Type: "error", Error: err.Error()})
 		return
 	}
 
-	resp := handle(req)
-	json.NewEncoder(conn).Encode(resp)
+	_ = json.NewEncoder(conn).Encode(handle(req))
 }
 
 func dirOf(path string) string {

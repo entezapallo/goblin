@@ -1,40 +1,34 @@
-// Package goblinpause es el cliente NDJSON delgado para el verbo "pause":
-// le pide al goblin corriendo que pause el job con el PID dado.
+// Package goblinpause es el cliente del verbo "pause": pide al goblin que
+// congele el worker con el PID dado (cgroup.freeze, pausa real).
 package goblinpause
 
 import (
-	"errors"
 	"strconv"
 
 	"goblin/pkg/core"
-	"goblin/pkg/gutils"
+	"goblin/pkg/verbs"
 )
 
 // Run ejecuta goblinpause con los argumentos dados.
 //
 // Uso:
 //
-//	goblinpause PID
+//	goblinpause [-g ID] PID
 func Run(stdio *core.Stdio, args []string) int {
-	if len(args) < 1 {
+	ref, rest := verbs.ParseRef(args)
+	if len(rest) < 1 {
 		return core.UsageError(stdio, "goblinpause", "falta PID")
 	}
-	pid, err := strconv.Atoi(args[0])
+	pid, err := strconv.Atoi(rest[0])
 	if err != nil {
-		return core.UsageError(stdio, "goblinpause", "PID inválido: "+args[0])
+		return core.UsageError(stdio, "goblinpause", "PID inválido: "+rest[0])
 	}
 
-	sock := gutils.SocketPath()
-	if sock == "" {
-		return core.FileError(stdio, "goblinpause", "socket", errors.New("no se pudo resolver el socket del goblin"))
-	}
-
-	resp, err := gutils.SimpleVerb(sock, "pause", pid)
+	resp, err := verbs.Mutate(ref, "pause", pid, nil)
 	if err != nil {
 		stdio.Errorf("goblinpause: %v\n", err)
 		return core.ExitFailure
 	}
-
 	stdio.Println(resp)
 	return core.ExitSuccess
 }

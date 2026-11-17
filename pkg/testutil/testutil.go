@@ -149,6 +149,7 @@ type AppletTestCase struct {
 	WantOutSub string                         // Expected stdout substring
 	WantErr    string                         // Expected stderr substring
 	Files      map[string]string              // Files to create in temp dir
+	Env        []string                       // nil hereda el entorno; []string{} lo vacía
 	Setup      func(t *testing.T, dir string) // Optional setup function
 	Check      func(t *testing.T, dir string) // Optional post-run check
 }
@@ -166,6 +167,24 @@ func RunAppletTests(t *testing.T, run RunApplet, tests []AppletTestCase) {
 	t.Helper()
 	for _, tt := range tests {
 		t.Run(tt.Name, func(t *testing.T) {
+			// Los applets pueden llamar a os.Setenv (p. ej. `export` de ash).
+			// Snapshot + restauración evita que un subtest contamine a los
+			// siguientes; Env permite pedir explícitamente un entorno vacío.
+			originalEnv := os.Environ()
+			t.Cleanup(func() { restoreEnv(originalEnv) })
+			if tt.Env != nil {
+				os.Clearenv()
+				for _, entry := range tt.Env {
+					key, value, ok := strings.Cut(entry, "=")
+					if !ok {
+						continue
+					}
+					if err := os.Setenv(key, value); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+
 			// Create temp directory with files
 			var dir string
 			if len(tt.Files) > 0 {
@@ -213,5 +232,15 @@ func RunAppletTests(t *testing.T, run RunApplet, tests []AppletTestCase) {
 				tt.Check(t, dir)
 			}
 		})
+	}
+}
+
+func restoreEnv(env []string) {
+	os.Clearenv()
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			_ = os.Setenv(key, value)
+		}
 	}
 }
