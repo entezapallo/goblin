@@ -26,6 +26,7 @@ func TestContractRulesEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	gg := filepath.Join(root, "scripts", "gg")
+	guard := buildGuard(t, root)
 
 	runtimeDir := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
@@ -63,6 +64,7 @@ func TestContractRulesEndToEnd(t *testing.T) {
 		DeathPipeFD: int(readEnd.Fd()),
 		OwnerPID:    os.Getpid(),
 		GGPath:      gg,
+		GuardBin:    guard,
 		Rules: []contract.Rule{
 			contract.TextRule(contract.RuleAbort, "oom-text", "ABORT_NOW"),
 		},

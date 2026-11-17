@@ -15,22 +15,26 @@ import (
 
 // Goblin es la vista pública de un manifiesto.
 type Goblin struct {
-	ID         string
-	PID        int
-	OwnerPID   int
-	CGroup     string
-	SocketPath string
-	State      string
+	ID             string
+	PID            int
+	Starttime      uint64
+	OwnerPID       int
+	OwnerStarttime uint64
+	CGroup         string
+	SocketPath     string
+	State          string
 }
 
 func fromManifest(m *manifest.Manifest) Goblin {
 	return Goblin{
-		ID:         m.ID,
-		PID:        m.PID,
-		OwnerPID:   m.OwnerPID,
-		CGroup:     m.CGroup,
-		SocketPath: m.Socket,
-		State:      m.State,
+		ID:             m.ID,
+		PID:            m.PID,
+		Starttime:      m.Starttime,
+		OwnerPID:       m.OwnerPID,
+		OwnerStarttime: m.OwnerStarttime,
+		CGroup:         m.CGroup,
+		SocketPath:     m.Socket,
+		State:          m.State,
 	}
 }
 
@@ -115,19 +119,22 @@ func Resolve(ref string) (*Goblin, error) {
 		}
 	}
 
-	// Ancestría: subir por PPID real buscando el proceso goblin o el
-	// instructor (owner) de algún manifiesto.
-	for pid := os.Getpid(); pid > 1; {
+	// Ancestría: usar gprocutil.Ancestors, que compara (pid,starttime)
+	// para no resolver un goblin equivocado si el PID se recicló.
+	// Ancestors no incluye el propio PID; un worker llama desde dentro
+	// del goblin, así que también comprobamos el proceso actual.
+	chain := append([]gprocutil.Identity{{PID: os.Getpid()}}, gprocutil.Ancestors(os.Getpid())...)
+	for _, id := range chain {
+		_, _, _, _, _, _, _, _, selfStart := gprocutil.ReadStat(id.PID)
+		if id.Starttime == 0 {
+			id.Starttime = selfStart
+		}
 		for i := range goblins {
-			if goblins[i].PID == pid || goblins[i].OwnerPID == pid {
+			if (goblins[i].PID == id.PID && goblins[i].Starttime == id.Starttime) ||
+				(goblins[i].OwnerPID == id.PID && goblins[i].OwnerStarttime == id.Starttime) {
 				return &goblins[i], nil
 			}
 		}
-		ppid, _, _, _, _, _, _, _ := gprocutil.ReadStat(pid)
-		if ppid <= 0 || ppid >= pid {
-			break
-		}
-		pid = ppid
 	}
 
 	return nil, fmt.Errorf("no se pudo resolver el goblin (candidatos: %s)", candidates())

@@ -57,10 +57,17 @@ type Facts struct {
 	OOM          bool
 	MemOver      bool
 	MemPeakBytes uint64
+	MemMeanBytes uint64
+	WorkerPeaks  []uint64
 	Elapsed      time.Duration
 	FailedCount  int
+	SevereCount  int // OOM o muerte por señal
+	OOMCount     int
 	WorkerCount  int
 	Text         string // tail de stdout+stderr del paso
+	StdoutTail   string
+	StderrTail   string
+	FileSize     func(path string) int64 // inyectado por el actor; nil = 0
 }
 
 // RuleKind: fail_when marca el paso fallido al cerrar; abort_when es
@@ -78,7 +85,8 @@ type Rule struct {
 	Kind    RuleKind
 	Name    string
 	When    func(Facts) bool
-	Command string // hook de notificación
+	Channel string // destino de notify_when
+	Data    string // payload, o "log" para stderr_tail
 }
 
 func textRule(kind RuleKind, name, pattern string) Rule {
@@ -121,9 +129,27 @@ type Effect struct {
 	Command string
 	Outcome Outcome
 	Message string
+	Channel string // notify_when: destino
+	Data    string // notify_when: payload
 }
 
 const tailLimit = 50 * 1024 // últimos 50 KB del stderr, como fija el diseño
+
+// Failure es el struct de depuración de un worker que falló.
+type Failure struct {
+	Worker     string            `json:"worker"`
+	Labels     map[string]string `json:"labels"`
+	Exit       FailureExit       `json:"exit"`
+	StderrTail []string          `json:"stderr_tail"`
+	Status     map[string]any    `json:"status,omitempty"`
+}
+
+// FailureExit describe cómo terminó el worker.
+type FailureExit struct {
+	Code   int     `json:"code"`
+	Signal *string `json:"signal"`
+	OOM    bool    `json:"oom"`
+}
 
 // Worker es un proceso del paso.
 type Worker struct {
@@ -143,25 +169,77 @@ type Step struct {
 	Rules      []Rule
 	OnComplete string
 	OnFail     string
+	Labels     map[string]string
+	Cmd        []string
 	StartedAt  time.Time
+	ClosedAt   time.Time
 
 	tail       bytes.Buffer
+	stdoutTail bytes.Buffer
+	stderrTail bytes.Buffer
 	aborted    bool
 	notifiedAt map[string]time.Time
 	cooldown   time.Duration
+
+	oomCount    int
+	severeCount int
+	memSamples  []uint64
+	fileSize    func(path string) int64
 }
 
 // NewStep crea un paso en pending.
-func NewStep(id string, rules []Rule, onComplete, onFail string) *Step {
+func NewStep(id string, rules []Rule, onComplete, onFail string, labels map[string]string, cmd []string) *Step {
+	if labels == nil {
+		labels = make(map[string]string)
+	}
 	return &Step{
 		ID:         id,
 		State:      StepPending,
 		Rules:      rules,
 		OnComplete: onComplete,
 		OnFail:     onFail,
+		Labels:     labels,
+		Cmd:        cmd,
 		StartedAt:  time.Now(),
 		notifiedAt: make(map[string]time.Time),
 		cooldown:   time.Minute,
+	}
+}
+
+// Tail devuelve el tail de stderr acumulado (hasta 50 KB).
+func (s *Step) Tail() string { return s.tail.String() }
+
+// SetFileSize inyecta la función que resuelve filesize(ruta). El actor la
+// provee porque el paquete contract es lógica pura sin acceso a discovery.
+func (s *Step) SetFileSize(fn func(string) int64) { s.fileSize = fn }
+
+// AddMemSample registra el pico de memoria de un worker para agregados.
+func (s *Step) AddMemSample(bytes uint64) { s.memSamples = append(s.memSamples, bytes) }
+
+// AddOOM incrementa el contador de OOM y severos del paso.
+func (s *Step) AddOOM() { s.oomCount++; s.severeCount++ }
+
+// AddSevere incrementa el contador de fallos severos (señal/OOM).
+func (s *Step) AddSevere() { s.severeCount++ }
+
+// OnOutputStream registra una línea de salida con su flujo.
+func (s *Step) OnOutputStream(stream, line string) {
+	s.OnOutput(line + "\n")
+	var buf *bytes.Buffer
+	switch stream {
+	case "stdout":
+		buf = &s.stdoutTail
+	case "stderr":
+		buf = &s.stderrTail
+	default:
+		return
+	}
+	buf.WriteString(line + "\n")
+	if buf.Len() > tailLimit {
+		b := buf.Bytes()
+		keep := len(b) - tailLimit
+		buf.Reset()
+		buf.Write(b[keep:])
 	}
 }
 
@@ -201,6 +279,19 @@ func (s *Step) Facts(now time.Time, peakBytes uint64, memOver bool) Facts {
 		Elapsed:      now.Sub(s.StartedAt),
 		WorkerCount:  len(s.Workers),
 		Text:         s.tail.String(),
+		StdoutTail:   s.stdoutTail.String(),
+		StderrTail:   s.stderrTail.String(),
+		OOMCount:     s.oomCount,
+		SevereCount:  s.severeCount,
+		WorkerPeaks:  s.memSamples,
+		FileSize:     s.fileSize,
+	}
+	if len(s.memSamples) > 0 {
+		var total uint64
+		for _, v := range s.memSamples {
+			total += v
+		}
+		f.MemMeanBytes = total / uint64(len(s.memSamples))
 	}
 	for _, w := range s.Workers {
 		if w.OOM {
@@ -260,7 +351,10 @@ func (s *Step) evaluate(now time.Time, peakBytes uint64, memOver bool) []Effect 
 			last := s.notifiedAt[r.Name]
 			if last.IsZero() || now.Sub(last) >= s.cooldown {
 				s.notifiedAt[r.Name] = now
-				out = append(out, Effect{Kind: "notify", Step: s.ID, Command: r.Command, Message: r.Name})
+				out = append(out, Effect{
+					Kind: "notify", Step: s.ID,
+					Message: r.Name, Channel: r.Channel, Data: r.Data,
+				})
 			}
 		}
 	}
@@ -303,6 +397,7 @@ func (s *Step) Close(now time.Time, peakBytes uint64, memOver bool) []Effect {
 	}
 	s.Outcome = outcome
 	s.State = StepClosed
+	s.ClosedAt = time.Now()
 
 	hook := s.OnComplete
 	if outcome != OutcomeSuccess {

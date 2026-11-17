@@ -1,5 +1,3 @@
-//go:build !js && !wasm && !wasip1
-
 // Package renice implements the renice command.
 package renice
 

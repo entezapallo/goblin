@@ -33,6 +33,20 @@ func AppendGoblinLog(pid int, evt any) error {
 	return appendLine(GoblinLogPath(pid), evt)
 }
 
+// GoblinLogPathByID devuelve el log por id (el nombre estable del goblin).
+func GoblinLogPathByID(id string) string {
+	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
+	if runtimeDir == "" {
+		runtimeDir = os.TempDir()
+	}
+	return filepath.Join(runtimeDir, "goblin", id+".history.jsonl")
+}
+
+// AppendGoblinLogByID escribe en el log identificado por id, no por PID.
+func AppendGoblinLogByID(id string, evt any) error {
+	return appendLine(GoblinLogPathByID(id), evt)
+}
+
 // --- Resumen global ---------------------------------------------------
 
 // SummaryEntry es una línea del resumen global: un job que terminó.

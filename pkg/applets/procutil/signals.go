@@ -1,5 +1,3 @@
-//go:build !js && !wasm && !wasip1
-
 package procutil
 
 import "syscall"

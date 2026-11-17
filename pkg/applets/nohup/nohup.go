@@ -1,5 +1,3 @@
-//go:build !js && !wasm && !wasip1
-
 // Package nohup implements a minimal nohup command.
 package nohup
 

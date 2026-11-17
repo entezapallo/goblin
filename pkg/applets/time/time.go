@@ -1,5 +1,3 @@
-//go:build !js && !wasm && !wasip1
-
 // Package time implements a minimal time command.
 package time
 

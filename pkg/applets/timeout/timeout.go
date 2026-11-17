@@ -1,5 +1,3 @@
-//go:build !js && !wasm && !wasip1
-
 // Package timeout implements a minimal timeout command.
 package timeout
 

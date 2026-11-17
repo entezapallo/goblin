@@ -9,7 +9,7 @@ import (
 )
 
 func TestStepSuccessAndHook(t *testing.T) {
-	s := contract.NewStep("step-1", nil, "echo OK", "echo FAIL")
+	s := contract.NewStep("step-1", nil, "echo OK", "echo FAIL", nil, nil)
 	s.State = contract.StepStarting
 	s.AddWorker(100, "g/step-1/w-1")
 	if s.State != contract.StepActive {
@@ -30,7 +30,7 @@ func TestStepSuccessAndHook(t *testing.T) {
 
 func TestFailWhenAndFailHook(t *testing.T) {
 	rules := []contract.Rule{contract.FailedCountRule(contract.RuleFail, "muchos-fallos", 1)}
-	s := contract.NewStep("step-1", rules, "echo OK", "echo FAIL")
+	s := contract.NewStep("step-1", rules, "echo OK", "echo FAIL", nil, nil)
 	s.AddWorker(100, "g/step-1/w-1")
 	s.OnWorkerExit(100, 2, false, time.Now(), 0, false)
 	effects := s.Close(time.Now(), 0, false)
@@ -44,7 +44,7 @@ func TestFailWhenAndFailHook(t *testing.T) {
 
 func TestAbortWhenTextFiresOnce(t *testing.T) {
 	rules := []contract.Rule{contract.TextRule(contract.RuleAbort, "oom-text", "out of memory")}
-	s := contract.NewStep("step-1", rules, "", "")
+	s := contract.NewStep("step-1", rules, "", "", nil, nil)
 	s.AddWorker(100, "g/step-1/w-1")
 	s.AddWorker(101, "g/step-1/w-2")
 
@@ -67,9 +67,10 @@ func TestNotifyCooldown(t *testing.T) {
 		Kind:    contract.RuleNotify,
 		Name:    "notificar",
 		When:    func(f contract.Facts) bool { return true },
-		Command: "notify",
+		Channel: "email",
+		Data:    "alerta",
 	}}
-	s := contract.NewStep("step-1", rules, "", "")
+	s := contract.NewStep("step-1", rules, "", "", nil, nil)
 	s.AddWorker(100, "g/step-1/w-1")
 	now := time.Now()
 	if got := s.Tick(now, 0, false); len(got) != 1 {
@@ -88,7 +89,7 @@ func TestOOMAndTimeoutFacts(t *testing.T) {
 		contract.OOMRule(contract.RuleAbort, "oom"),
 		contract.TimeoutRule(contract.RuleNotify, "tiempo", 50*time.Millisecond),
 	}
-	s := contract.NewStep("step-1", rules, "", "")
+	s := contract.NewStep("step-1", rules, "", "", nil, nil)
 	s.AddWorker(100, "g/step-1/w-1")
 	// Timeout aún no: el paso recién empieza.
 	s.OnWorkerExit(100, 0, true, time.Now(), 0, true)
@@ -105,7 +106,7 @@ func TestOOMAndTimeoutFacts(t *testing.T) {
 func TestMemOverRule(t *testing.T) {
 	s := contract.NewStep("step-1", []contract.Rule{
 		contract.MemOverRule(contract.RuleAbort, "mem", 1024),
-	}, "", "")
+	}, "", "", nil, nil)
 	s.AddWorker(100, "g/step-1/w-1")
 	if got := s.Tick(time.Now(), 2048, true); len(got) != 1 {
 		t.Fatalf("mem_over no disparó: %+v", got)

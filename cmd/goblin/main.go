@@ -52,6 +52,7 @@ func main() {
 		DeathPipeFD:  deathFD,
 		OwnerPID:     ownerPID,
 		GGPath:       ggPath,
+		GuardBin:     os.Getenv("GOBLIN_GUARD"),  // supervisor de liveness
 		OrphanPolicy: os.Getenv("GOBLIN_ORPHAN"), // keep | kill | freeze
 		NotifyHook:   os.Getenv("GOBLIN_NOTIFY"), // sh -c para notify_when
 		OnComplete:   os.Getenv("GOBLIN_ON_COMPLETE"),

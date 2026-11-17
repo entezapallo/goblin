@@ -1,5 +1,3 @@
-//go:build !js && !wasm && !wasip1
-
 // Package startstopdaemon implements a minimal start-stop-daemon command.
 package startstopdaemon
 

@@ -28,6 +28,17 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timeout esperando: %s", what)
 }
 
+func buildGuard(t *testing.T, root string) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "gguard")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/gguard")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build gguard: %v: %s", err, out)
+	}
+	return bin
+}
+
 func readEvents(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -47,6 +58,7 @@ func TestGoblinLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	gg := filepath.Join(root, "scripts", "gg")
+	guard := buildGuard(t, root)
 	if _, err := os.Stat(gg); err != nil {
 		t.Fatalf("gg no encontrado: %v", err)
 	}
@@ -86,6 +98,7 @@ func TestGoblinLifecycle(t *testing.T) {
 		DeathPipeFD: int(readEnd.Fd()),
 		OwnerPID:    os.Getpid(),
 		GGPath:      gg,
+		GuardBin:    guard,
 	}
 	done := make(chan error, 1)
 	go func() { done <- gutils.Run(cfg) }()

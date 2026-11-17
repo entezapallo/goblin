@@ -1,5 +1,3 @@
-//go:build !js && !wasm && !wasip1
-
 // Package setsid implements a minimal setsid command.
 package setsid
 

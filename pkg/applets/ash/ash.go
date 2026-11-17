@@ -1,5 +1,3 @@
-//go:build !js && !wasm && !wasip1
-
 // Package ash implements a minimal BusyBox ash-like shell.
 package ash
 
@@ -1333,28 +1331,6 @@ func (r *runner) withRedirections(spec commandSpec, fn func() (int, bool)) (int,
 	return code, exit
 }
 
-// runRunScript handles run...nur blocks — el bloque que en gsh define
-// un job para goblin. Primera versión: solo reconoce el bloque y corre
-// el cuerpo como script normal, sin conectar a gutils.Call todavía.
-func (r *runner) runRunScript(script string) (int, bool) {
-	tokens := tokenizeScript(script)
-	if len(tokens) == 0 || tokens[0] != "run" {
-		return 0, false
-	}
-	nurIdx := findMatchingTerminator(tokens, 0)
-	if nurIdx == -1 {
-		return 0, false
-	}
-	bodyTokens := tokens[1:nurIdx]
-	bodyScript := tokensToScript(bodyTokens)
-
-	// TODO: en vez de correr el cuerpo inline, esto debería armar un
-	// Cmd y llamar gutils.Call(sock, Event{Type:"submit", Cmd: cmd})
-	// contra el homunculi de este script. Por ahora corre inline para
-	// validar que el parser reconoce run...nur correctamente.
-	status := r.runScript(bodyScript)
-	return status, true
-}
 func (r *runner) runWhileScript(script string) (int, bool) {
 	tokens := tokenizeScript(script)
 	if len(tokens) == 0 || tokens[0] != "while" {
@@ -6650,7 +6626,6 @@ var compoundStarters = map[string]string{
 	"for":   "done",
 	"if":    "fi",
 	"case":  "esac",
-	"run":   "nur",
 	"{":     "}",
 }
 

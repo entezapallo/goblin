@@ -32,6 +32,7 @@ uso: gg COMANDO [ARG...]
   wait NAME             bloquea hasta populated = 0
   stat NAME             métricas del grupo
   remove NAME           borra el grupo (debe estar vacío)
+  sweep                 borra grupos huérfanos (sin manifiesto y sin procesos)
 
 Variables de entorno:
   GOBLIN_CGROUP   override del directorio base (útil para tests)
@@ -111,6 +112,23 @@ require_group() {
 
 # --- comandos ---------------------------------------------------------
 
+enable_controllers_in() {
+    # subtree_control se escribe en el PADRE, no en el grupo nuevo.
+    _dir=$1
+    [ -f "$_dir/cgroup.controllers" ] || return 0
+    _oldifs=$IFS
+    IFS=' 	
+'
+    for _c in $(cat "$_dir/cgroup.controllers"); do
+        case "$_c" in
+            cpu|memory|pids|io|cpuset)
+                printf '+%s\n' "$_c" >> "$_dir/cgroup.subtree_control" 2>/dev/null || true
+                ;;
+        esac
+    done
+    IFS=$_oldifs
+}
+
 cmd_create() {
     [ $# -ge 1 ] || die "create requiere NAME"
     name=$1
@@ -118,20 +136,38 @@ cmd_create() {
     b=$(base)
     [ -d "$b" ] || mkdir -p "$b" || die "no se pudo crear la base: $b"
     t="$b/$name"
-    mkdir "$t" || die "no se pudo crear el grupo: $t"
+    mkdir -p "$t" || die "no se pudo crear el grupo: $t"
 
-    # subtree_control se escribe en el PADRE. Habilitamos los controladores
-    # que el kernel pone a disposición en este punto del hierarchy.
-    if [ -f "$b/cgroup.controllers" ]; then
-        for c in $(cat "$b/cgroup.controllers"); do
-            case "$c" in
-                cpu|memory|pids|io|cpuset)
-                    printf '+%s\n' "$c" >> "$b/cgroup.subtree_control" 2>/dev/null || true
-                    ;;
-            esac
-        done
-    fi
+    # Con nombres anidados (<id>/step-1/w-1) hay que habilitar controladores
+    # en CADA nivel: si no, el step no tiene memory.max ni cpu.max.
+    cur=$b
+    oldifs=$IFS
+    IFS='/'
+    for seg in $name; do
+        [ -n "$seg" ] || continue
+        enable_controllers_in "$cur"
+        cur="$cur/$seg"
+    done
+    IFS=$oldifs
     printf '%s\n' "$t"
+}
+
+cmd_sweep() {
+    b=$(base)
+    [ -d "$b" ] || return 0
+    runtime_dir=${XDG_RUNTIME_DIR:-/tmp}
+    for group in "$b"/*; do
+        [ -d "$group" ] || continue
+        id=${group##*/}
+        # Un manifiesto vivo protege al grupo: puede estar arrancando o ser
+        # un goblin detach (su daemon no está dentro de su propio cgroup).
+        [ -f "$runtime_dir/goblin/$id.json" ] && continue
+        procs=$(cat "$group/cgroup.procs" 2>/dev/null || true)
+        [ -n "$procs" ] && continue
+        # Subdirectorios vacíos (step-N/w-I) de abajo hacia arriba.
+        find "$group" -mindepth 1 -type d -depth -exec rmdir {} \; 2>/dev/null || true
+        rmdir "$group" 2>/dev/null || true
+    done
 }
 
 cmd_list() {
@@ -180,9 +216,15 @@ cmd_limit() {
             cpu)
                 [ -f "$t/cpu.max" ] || die "cpu.max no disponible"
                 case "$val" in
-                    ''|*[!0-9]*) die "cpu debe ser un entero: $val" ;;
+                    ''|*[!0-9.]*) die "cpu debe ser un número: $val" ;;
                 esac
-                printf '%s 100000\n' "$((val * 100000))" > "$t/cpu.max" ||
+                # cpu.max = "quota period"; para N cores, quota = N*100000.
+                # awk calcula decimales y redondea (el shell no sabe).
+                quota=$(awk -v c="$val" 'BEGIN { printf "%.0f", c * 100000 }') ||
+                    die "cpu inválido: $val"
+                [ -n "$quota" ] && [ "$quota" -gt 0 ] 2>/dev/null ||
+                    die "cpu debe ser mayor que cero: $val"
+                printf '%s 100000\n' "$quota" > "$t/cpu.max" ||
                     die "no se pudo escribir cpu.max"
                 ;;
             pids)
@@ -270,6 +312,9 @@ cmd_remove() {
     name=$1
     check_name "$name"
     t=$(require_group "$name")
+    # Los subdirectorios step-N/w-I pueden quedar del goroutine de
+    # on_leftover; se bajan vacíos de abajo hacia arriba antes del rmdir.
+    find "$t" -mindepth 1 -type d -depth -exec rmdir {} \; 2>/dev/null || true
     rmdir "$t" || die "no se pudo borrar el grupo (¿está vacío?): $t"
 }
 
@@ -282,6 +327,7 @@ case "$cmd" in
     discover) discover ;;
     create)   cmd_create "$@" ;;
     list)     cmd_list "$@" ;;
+    sweep)    cmd_sweep "$@" ;;
     enter)    cmd_enter "$@" ;;
     limit)    cmd_limit "$@" ;;
     freeze)   set_freeze "$1" 1 ;;

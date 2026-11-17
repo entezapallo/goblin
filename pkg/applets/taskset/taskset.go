@@ -1,5 +1,3 @@
-//go:build !js && !wasm && !wasip1
-
 // Package taskset implements a minimal taskset command.
 package taskset
 

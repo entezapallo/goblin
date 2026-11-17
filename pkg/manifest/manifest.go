@@ -13,14 +13,15 @@ import (
 
 // Manifest describe un goblin vivo.
 type Manifest struct {
-	ID        string    `json:"id"`
-	PID       int       `json:"pid"`
-	Starttime uint64    `json:"starttime,omitempty"`
-	CGroup    string    `json:"cgroup"`
-	Socket    string    `json:"socket"`
-	OwnerPID  int       `json:"owner_pid"`
-	State     string    `json:"state"`
-	CreatedAt time.Time `json:"created_at"`
+	ID             string    `json:"id"`
+	PID            int       `json:"pid"`
+	Starttime      uint64    `json:"starttime,omitempty"`
+	OwnerStarttime uint64    `json:"owner_starttime,omitempty"`
+	CGroup         string    `json:"cgroup"`
+	Socket         string    `json:"socket"`
+	OwnerPID       int       `json:"owner_pid"`
+	State          string    `json:"state"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // Dir devuelve el directorio de placas, respetando XDG_RUNTIME_DIR.
