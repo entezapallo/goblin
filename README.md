@@ -1,8 +1,17 @@
-# goblin
-
-> Una abstracción de scripts con semántica de **contracts de illumos**, construida en estilo Unix sobre **cgroups v2**: shell POSIX + un puñado de applets chiquitos, propios y compatibles, que dan a cada script un subárbol de procesos con límites, pausa, muerte confiable y eventos observables.
-
-`goblin` es un hard fork podado de [`rcarmo/go-busybox`](https://github.com/rcarmo/go-busybox) (MIT). El fork aporta el **mecanismo** — un `ash` POSIX real y probado, parsing de `/proc`, applets de señales y el stdlib de scripting. `goblin` aporta la **política**: qué significa cada estado, evento y señal en términos de un contrato de ciclo de vida.
+<table>
+  <tr>
+    <td width="190" valign="top" align="center">
+      <img src=".media/logo.jpeg" alt="Logo de Bergënot" width="160" />
+      <br />
+      <sub>Logo de <strong>Bergënot</strong>, grupo de música.</sub>
+    </td>
+    <td valign="top">
+      <h1>goblin</h1>
+      <p><em>Una abstracción de scripts con semántica de <strong>contracts de illumos</strong>, construida en estilo Unix sobre <strong>cgroups v2</strong>: shell POSIX + un puñado de applets chiquitos, propios y compatibles, que dan a cada script un subárbol de procesos con límites, pausa, muerte confiable y eventos observables.</em></p>
+      <p><code>goblin</code> es un hard fork podado de <a href="https://github.com/rcarmo/go-busybox">rcarmo/go-busybox</a> (MIT). El fork aporta el <strong>mecanismo</strong> — un <code>ash</code> POSIX real y probado, parsing de <code>/proc</code>, applets de señales y el stdlib de scripting. <code>goblin</code> aporta la <strong>política</strong>: qué significa cada estado, evento y señal en términos de un contrato de ciclo de vida.</p>
+    </td>
+  </tr>
+</table>
 
 ---
 
