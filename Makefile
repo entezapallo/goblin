@@ -1,41 +1,54 @@
 SHELL := /bin/bash
 
 .DEFAULT_GOAL := build
+BINDIR := _build
+BINARIES := gash summon goblin gguard raven orb grimoire
+INSTDIR := $(HOME)/.local/bin
 
 .PHONY: build
-build: ## Intenta compilar todo el arbol tal cual esta (detecta imports rotos)
-	@go build ./... 2>&1 | tee /tmp/build-errors.log; \
-	if [ -s /tmp/build-errors.log ]; then \
-		echo ""; echo "=== BUILD FALLO, ver errores arriba ==="; exit 1; \
-	fi; \
-	echo "BUILD OK"
+build: ## Compila todos los binarios en _build/
+	@mkdir -p $(BINDIR)
+	@for b in $(BINARIES); do \
+		go build -o $(BINDIR)/$$b ./cmd/$$b || exit 1; \
+		printf '  %-10s ok\n' $$b; \
+	done
 
-.PHONY: vet
-vet: ## Igual que build pero con go vet (a veces pesca cosas distintas)
-	@go vet ./...
-
-.PHONY: sizes
-sizes: ## Compila cada cmd/<applet> restante y muestra el tamaño de cada binario
-	@mkdir -p _build/sizes
-	@total=0; \
-	for d in cmd/*/; do \
-		name=$$(basename "$$d"); \
-		if go build -o "_build/sizes/$$name" "./$$d" 2>/tmp/sizes-err-$$name.log; then \
-			size=$$(stat -f%z "_build/sizes/$$name" 2>/dev/null || stat -c%s "_build/sizes/$$name"); \
-			total=$$((total + size)); \
-			printf '%-20s %10d bytes\n' "$$name" "$$size"; \
-		else \
-			printf '%-20s %10s (build failed, ver /tmp/sizes-err-%s.log)\n' "$$name" "FAIL" "$$name"; \
-		fi; \
-	done; \
-	echo "----------------------------------------"; \
-	printf 'TOTAL%16s %10d bytes (%s MB)\n' "" "$$total" "$$(echo "scale=2; $$total/1048576" | bc)"
+.PHONY: test
+test: ## Tests unitarios + de integración con cgroupfs
+	@go test ./... -count=1
 
 .PHONY: test-gg
-test-gg: ## prueba end-to-end de ggroups contra cgroupfs real
+test-gg: ## Prueba end-to-end de ggroups contra cgroupfs real
 	@./scripts/gg_test.sh
 
+.PHONY: vet
+vet: ## go vet
+	@go vet ./...
+
+.PHONY: fmt
+fmt: ## gofmt de todo el árbol
+	@gofmt -w cmd pkg
+
+.PHONY: check
+check: fmt vet test ## Todo junto antes de commitear
+
+.PHONY: install
+install: build ## Instala binarios y symlinks de grimoire en ~/.local/bin
+	@mkdir -p $(INSTDIR)
+	@for b in $(BINARIES); do install -m 755 $(BINDIR)/$$b $(INSTDIR)/$$b; done
+	@for a in ash awk cat cp cut diff echo find grep sed sort tr uniq wc ps kill pgrep pstree; do \
+		ln -sf grimoire $(INSTDIR)/$$a; \
+	done
+	@echo "Instalado en $(INSTDIR)"
+
+.PHONY: sizes
+sizes: ## Tamaño de cada binario
+	@mkdir -p $(BINDIR)
+	@for b in $(BINARIES); do \
+		go build -o $(BINDIR)/$$b ./cmd/$$b || exit 1; \
+		printf '%-10s %8s\n' $$b "$$(stat -c%s $(BINDIR)/$$b | numfmt --to=iec 2>/dev/null || stat -c%s $(BINDIR)/$$b)"; \
+	done
+
 .PHONY: clean
-clean:
-	@rm -f /tmp/build-errors.log /tmp/sizes-err-*.log
-	@rm -rf _build/sizes
+clean: ## Borra artefactos
+	@rm -rf $(BINDIR)

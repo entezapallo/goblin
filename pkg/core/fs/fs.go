@@ -1,6 +1,5 @@
-// Package fs provide the filesystem operations used by the applets.
-// Antes delegaba en pkg/sandbox (WASM); con el sandbox fuera del proyecto,
-// las operaciones son llamadas directas a os con la misma API.
+// Package fs provee las operaciones de filesystem usadas por los applets,
+// como llamadas directas a os con la misma API.
 package fs
 
 import (

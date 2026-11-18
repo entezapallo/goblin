@@ -1,12 +1,3 @@
 /_build/
 /coverage.out
-/busybox-reference/
-pkg/testdata/busybox-testsuite/runtest-tempdir-links/
 /dev/
-/.DS_Store
-/goblin
-/homunculi
-/greeting
-/infobash.log
-/info.bash
-/structure.txt
