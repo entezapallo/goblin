@@ -1,5 +1,53 @@
 # Lógica del contract
 
+## Casos de uso
+
+`goblin` existe para jobs computacionales pesados donde el modelo de "lanzar y
+olvidar" no alcanza: el trabajo tarda horas, consume recursos caros, se reparte
+en muchos procesos y necesitás saber qué pasó aunque nadie esté mirando.
+
+### Bioinformática
+
+Un pipeline NGS típico encadena `bwa` → `samtools` → `bcftools` sobre cientos
+de muestras. Acá:
+
+- con `workers=N` se paralelizan particiones dentro de un paso;
+- `abort_when {match 'CUDA out of memory' in stderr}` corta el paso en caliente
+  en vez de esperar a que todos los workers fracasen;
+- si el worker que lanzó `bwa` muere, `gprocutil.Ancestors`/`Subtree` y el
+  `step_tree` dejan constancia de qué hijos corrieron, para saber qué partición
+  no convergió;
+- `labels part=1,rows=200-400` viajan al struct de fallo y a los hooks.
+
+### Entrenamiento de ML
+
+Un entrenamiento con varias GPUs: `memory=48G cpu=8`, `nur` cierra el paso, y
+`on_headless freeze` permite **pausar de verdad** (`cgroup.freeze`) para
+liberar la GPU sin perder el estado, y reanudar después. Sin contract, pausar
+un entrenamiento es matarlo y reiniciar desde un checkpoint.
+
+### Cómputo científico y geoespacial
+
+Simulaciones largas con `notify_when {gt time 2h}` avisan por
+`notifications.jsonl` sin bloquear, y `fail_when {extreme}` cierra el paso con
+fallo si más del 60% de los workers fallan (o 40% de forma severa). El patrón
+`grun…nurg` encadena pasos dependientes sin un orquestador externo.
+
+### Por qué un contract y no un cron o un `nohup`
+
+| Necesidad | Con `nohup`/`&` | Con goblin |
+|---|---|---|
+| Saber si el job terminó bien | código de salida suelto | estados + `history.jsonl` |
+| Matar todo el trabajo | `kill` al líder, hijos huérfanos | `cgroup.kill` del subárbol |
+| Pausar sin perder trabajo | no existe | `cgroup.freeze` real |
+| Saber qué proceso falló y por qué | logs mezclados | `failures.jsonl` + `stderr_tail` + `status.json` |
+| Sobrevivir al cierre de la terminal | sí, pero sin control | `on_orphan` explícito |
+| Límites de memoria/CPU por job | `ulimit` por proceso | `memory.max`/`cpu.max` jerárquicos |
+
+En corto: el contract convierte un conjunto de procesos en una unidad con
+**identidad, límites, observabilidad y una garantía de muerte**, que es justo lo
+que falta cuando el job es caro y nadie lo está mirando.
+
 ## Qué es un contract
 
 Un contract es un conjunto de procesos con **identidad, límites, estados y
